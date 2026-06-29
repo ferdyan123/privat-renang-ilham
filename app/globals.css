@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --blue: #185FA5;
+  --blue-dark: #0C447C;
+  --blue-light: #E6F1FB;
+  --green: #1D9E75;
+  --yellow: #BA7517;
+  --red: #A32D2D;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  @apply bg-bg-2 text-text;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-thumb { @apply bg-border rounded; }
+
+/* Loader bar */
+.loader-bar {
+  position: fixed; top: 0; left: 0; right: 0; height: 2px;
+  background: var(--blue); z-index: 9999;
+  animation: loadPulse 1s ease infinite;
+}
+@keyframes loadPulse {
+  0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; }
+}
+
+/* Slide-up modal */
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+.animate-slide-up { animation: slideUp 0.25s ease; }
+
+/* Kartu print styles */
+.kartu-print {
+  background: #fff;
+  color: #111;
+  border-radius: 12px;
+  padding: 18px;
+  border: 1px solid #e0e0e0;
+}
