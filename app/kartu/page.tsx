@@ -142,17 +142,141 @@ function KartuContent() {
   const menunggu = data.status === 'menunggu_konfirmasi'
 
   return (
-    <div className="min-h-screen bg-[#E6F4FB] py-4 px-4">
-      {/* Header animasi */}
-      <div className="relative overflow-hidden rounded-xl mb-4 bg-[#185FA5]" style={{height:90}}>
-        <svg className="absolute bottom-0 left-0 w-full" viewBox="0 0 400 35" preserveAspectRatio="none" style={{height:28}}>
-          <path fill="rgba(255,255,255,0.15)" d="M0,18 C60,30 120,5 180,18 C240,30 300,5 400,18 L400,35 L0,35 Z">
+    <div className="min-h-screen relative py-4 px-4 overflow-hidden" style={{background:'#E6F4FB'}}>
+      {/* Ilustrasi background — anak-anak main air, dekorasi statis */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{opacity:0.5}}>
+        <svg className="absolute" style={{left:'5%',top:'12%'}} width="80" height="80" viewBox="0 0 80 80">
+          {/* Anak duduk di ban kuning */}
+          <circle cx="40" cy="48" r="22" fill="#FFD93D"/>
+          <circle cx="40" cy="48" r="22" fill="none" stroke="#F0B800" strokeWidth="2" strokeDasharray="8 5"/>
+          <circle cx="40" cy="48" r="13" fill="#A8E1F5"/>
+          <ellipse cx="40" cy="44" rx="9" ry="10" fill="#FBC990"/>
+          <circle cx="40" cy="26" r="10" fill="#FBC990"/>
+          <path d="M30,22 Q40,10 50,22 Q50,17 40,16 Q30,17 30,22 Z" fill="#6B4226"/>
+          <ellipse cx="22" cy="40" rx="7" ry="3.5" fill="#FBC990" transform="rotate(-30 22 40)"/>
+        </svg>
+
+        <svg className="absolute" style={{right:'8%',top:'22%'}} width="64" height="64" viewBox="0 0 64 64">
+          {/* Anak berenang gaya bebas, dilihat dari atas */}
+          <ellipse cx="32" cy="32" rx="16" ry="9" fill="#7FD6E8" opacity="0.5"/>
+          <ellipse cx="32" cy="30" rx="10" ry="6" fill="#FBC990"/>
+          <circle cx="32" cy="18" r="7" fill="#FBC990"/>
+          <ellipse cx="32" cy="14" rx="7" ry="4" fill="#FF6B81"/>
+          <ellipse cx="18" cy="28" rx="7" ry="3" fill="#FBC990" transform="rotate(-20 18 28)"/>
+          <ellipse cx="46" cy="28" rx="7" ry="3" fill="#FBC990" transform="rotate(20 46 28)"/>
+        </svg>
+
+        <svg className="absolute" style={{left:'10%',bottom:'15%'}} width="70" height="70" viewBox="0 0 70 70">
+          {/* Anak dengan ban bebek */}
+          <ellipse cx="35" cy="50" rx="24" ry="10" fill="#FFE17D"/>
+          <ellipse cx="50" cy="42" rx="8" ry="7" fill="#FFE17D"/>
+          <ellipse cx="55" cy="38" rx="3" ry="2.5" fill="#FF8A3D"/>
+          <circle cx="53" cy="40" r="1.2" fill="#3A2A20"/>
+          <ellipse cx="35" cy="42" rx="9" ry="9" fill="#FBC990"/>
+          <circle cx="35" cy="26" r="9" fill="#FBC990"/>
+          <path d="M26,22 Q35,12 44,22 L44,18 Q35,14 26,18 Z" fill="#3A2A20"/>
+        </svg>
+
+        <svg className="absolute" style={{right:'12%',bottom:'25%'}} width="56" height="56" viewBox="0 0 56 56">
+          {/* Bola pantai */}
+          <circle cx="28" cy="28" r="18" fill="#FF6B6B"/>
+          <path d="M28,10 A18,18 0 0,1 28,46" fill="#FFD93D"/>
+          <path d="M28,10 A18,18 0 0,0 28,46" fill="#4ECDC4" opacity="0.7"/>
+          <circle cx="28" cy="28" r="18" fill="none" stroke="#fff" strokeWidth="1" opacity="0.4"/>
+        </svg>
+
+        <svg className="absolute" style={{left:'45%',top:'8%'}} width="48" height="48" viewBox="0 0 48 48" opacity="0.6">
+          {/* Gelembung dekor */}
+          <circle cx="24" cy="24" r="6" fill="none" stroke="#185FA5" strokeWidth="1.5"/>
+          <circle cx="36" cy="14" r="3" fill="none" stroke="#185FA5" strokeWidth="1.5"/>
+          <circle cx="10" cy="10" r="2" fill="none" stroke="#185FA5" strokeWidth="1.5"/>
+        </svg>
+
+        <svg className="absolute" style={{left:'48%',bottom:'10%'}} width="60" height="60" viewBox="0 0 60 60">
+          {/* Ikan kecil lucu */}
+          <ellipse cx="28" cy="30" rx="16" ry="10" fill="#5DD5E8"/>
+          <path d="M44,30 L54,20 L54,40 Z" fill="#5DD5E8"/>
+          <circle cx="20" cy="27" r="2" fill="#1A4D5C"/>
+          <path d="M14,32 Q20,38 28,35" stroke="#1A4D5C" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+        </svg>
+      </div>
+
+      <div className="relative z-10">
+      {/* Header animasi — anak renang + ban pelampung */}
+      <div className="relative overflow-hidden rounded-xl mb-4 bg-[#185FA5]" style={{height:110}}>
+        {/* Gelombang air */}
+        <svg className="absolute bottom-0 left-0 w-full" viewBox="0 0 400 40" preserveAspectRatio="none" style={{height:32}}>
+          <path fill="rgba(255,255,255,0.18)" d="M0,20 C60,33 120,7 180,20 C240,33 300,7 400,20 L400,40 L0,40 Z">
             <animate attributeName="d" dur="4s" repeatCount="indefinite"
-              values="M0,18 C60,30 120,5 180,18 C240,30 300,5 400,18 L400,35 L0,35 Z;
-                      M0,12 C70,26 130,4 200,16 C270,28 340,6 400,12 L400,35 L0,35 Z;
-                      M0,18 C60,30 120,5 180,18 C240,30 300,5 400,18 L400,35 L0,35 Z"/>
+              values="M0,20 C60,33 120,7 180,20 C240,33 300,7 400,20 L400,40 L0,40 Z;
+                      M0,13 C70,28 130,5 200,17 C270,30 340,6 400,13 L400,40 L0,40 Z;
+                      M0,20 C60,33 120,7 180,20 C240,33 300,7 400,20 L400,40 L0,40 Z"/>
+          </path>
+          <path fill="rgba(255,255,255,0.12)" d="M0,28 C70,14 130,36 200,22 C270,8 330,32 400,22 L400,40 L0,40 Z">
+            <animate attributeName="d" dur="5.5s" repeatCount="indefinite"
+              values="M0,28 C70,14 130,36 200,22 C270,8 330,32 400,22 L400,40 L0,40 Z;
+                      M0,22 C80,36 140,12 210,28 C280,12 340,36 400,26 L400,40 L0,40 Z;
+                      M0,28 C70,14 130,36 200,22 C270,8 330,32 400,22 L400,40 L0,40 Z"/>
           </path>
         </svg>
+
+        {/* Gelembung kecil mengambang */}
+        {[[30,55,3,'3.2s',0],[330,48,2.5,'4s',0.5],[370,60,3.5,'3.6s',1]].map(([x,y,r,dur,delay],i)=>(
+          <div key={i} className="absolute rounded-full bg-white/25"
+            style={{left:x as number,top:y as number,width:(r as number)*2.5,height:(r as number)*2.5,
+              animation:`kartuBubble${i} ${dur} ease-in-out ${delay}s infinite`}}/>
+        ))}
+
+        {/* Anak main air dengan ban pelampung — mengayun di permukaan */}
+        <div className="absolute" style={{right:18,bottom:8,animation:'floatBob 2.4s ease-in-out infinite'}}>
+          <svg width="58" height="50" viewBox="0 0 58 50">
+            {/* Riak air di bawah ban */}
+            <ellipse cx="29" cy="42" rx="22" ry="4" fill="#FFFFFF" opacity="0.15">
+              <animate attributeName="rx" values="22;26;22" dur="2.4s" repeatCount="indefinite"/>
+            </ellipse>
+            {/* Ban pelampung (donut) */}
+            <circle cx="29" cy="34" r="16" fill="#FF8A5B"/>
+            <circle cx="29" cy="34" r="16" fill="none" stroke="#E8643A" strokeWidth="1.5" strokeDasharray="6 4"/>
+            <circle cx="29" cy="34" r="9.5" fill="#185FA5"/>
+            {/* Badan anak duduk di tengah ban */}
+            <ellipse cx="29" cy="32" rx="7" ry="8" fill="#F9C784"/>
+            {/* Kepala */}
+            <circle cx="29" cy="16" r="8" fill="#F9C784"/>
+            {/* Rambut */}
+            <path d="M21,13 Q29,4 37,13 Q37,9 29,8 Q21,9 21,13 Z" fill="#5C3D2E"/>
+            {/* Wajah - senyum */}
+            <circle cx="26" cy="16" r="1.2" fill="#3A2A20"/>
+            <circle cx="32" cy="16" r="1.2" fill="#3A2A20"/>
+            <path d="M25,20 Q29,23 33,20" stroke="#3A2A20" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+            {/* Tangan kiri melambai */}
+            <ellipse cx="16" cy="28" rx="6" ry="3" fill="#F9C784" transform="rotate(-25 16 28)">
+              <animateTransform attributeName="transform" type="rotate"
+                values="-25 16 28;-50 16 28;-25 16 28" dur="1.1s" repeatCount="indefinite"/>
+            </ellipse>
+            {/* Tangan kanan di ban */}
+            <ellipse cx="42" cy="32" rx="6" ry="3" fill="#F9C784" transform="rotate(20 42 32)"/>
+          </svg>
+        </div>
+
+        {/* Splash kecil di sekitar ban */}
+        <div className="absolute" style={{right:8,bottom:14,animation:'floatBob 2.4s ease-in-out infinite'}}>
+          <svg width="16" height="16" viewBox="0 0 16 16" opacity="0.6">
+            <circle cx="3" cy="10" r="1.4" fill="#fff">
+              <animate attributeName="opacity" values="0.6;0.1;0.6" dur="1.8s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="13" cy="6" r="1" fill="#fff">
+              <animate attributeName="opacity" values="0.5;0.1;0.5" dur="1.5s" repeatCount="indefinite" begin="0.4s"/>
+            </circle>
+          </svg>
+        </div>
+
+        <style>{`
+          @keyframes floatBob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+          @keyframes kartuBubble0,@keyframes kartuBubble1,@keyframes kartuBubble2 {
+            0%,100%{transform:translateY(0);opacity:.25} 50%{transform:translateY(-10px);opacity:.05}
+          }
+        `}</style>
+
         <div className="absolute inset-0 flex items-center px-5 gap-3">
           <div className="w-9 h-9 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
             <i className="ti ti-ripple text-white text-xl" />
@@ -305,6 +429,7 @@ function KartuContent() {
         <div className="text-center text-[11px] text-gray-400 pb-4">
           SwimTrack · {new Date().getFullYear()}
         </div>
+      </div>
       </div>
     </div>
   )

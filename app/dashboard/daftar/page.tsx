@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getPendingMembers, updatePendingStatus, addMurid, getTagihanPending, updateTagihanStatus, PendingMember } from '@/lib/supabase'
+import { getPendingMembers, updatePendingStatus, addMurid, getTagihanPending, getTagihanHistory, updateTagihanStatus, PendingMember } from '@/lib/supabase'
 import { showToast } from '@/components/ui/Toast'
 import Avatar from '@/components/ui/Avatar'
 
@@ -10,6 +10,9 @@ export default function DaftarPage() {
   const [filter, setFilter] = useState<DaftarFilter>('menunggu')
   const [list, setList] = useState<PendingMember[]>([])
   const [tagihanList, setTagihanList] = useState<any[]>([])
+  const [historyList, setHistoryList] = useState<any[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+  const [historyFilter, setHistoryFilter] = useState<'semua' | 'lunas' | 'belum_bayar'>('semua')
   const [loading, setLoading] = useState(false)
   const [loadingTagihan, setLoadingTagihan] = useState(false)
 
@@ -32,8 +35,15 @@ export default function DaftarPage() {
     finally { setLoadingTagihan(false) }
   }
 
+  const loadHistory = async () => {
+    try { setHistoryList(await getTagihanHistory()) }
+    catch (e: any) {
+      if (e?.code !== '42P01') console.error(e)
+    }
+  }
+
   useEffect(() => { loadPendaftaran() }, [filter])
-  useEffect(() => { loadTagihan() }, [])
+  useEffect(() => { loadTagihan(); loadHistory() }, [])
 
   const handleAcc = async (d: PendingMember) => {
     if (!confirm(`ACC pendaftaran ${d.nama_murid}?`)) return
@@ -58,8 +68,9 @@ export default function DaftarPage() {
     if (!confirm(`Konfirmasi pembayaran ${t.murid?.nama} siklus #${t.siklus}?`)) return
     try {
       await updateTagihanStatus(t.id, 'lunas')
-      showToast(`Pembayaran ${t.murid?.nama} dikonfirmasi ✓`, 'success')
+      showToast(`Pembayaran ${t.murid?.nama} dikonfirmasi ✓ — Siklus baru dimulai`, 'success')
       loadTagihan()
+      loadHistory()
     } catch { showToast('Gagal konfirmasi', 'error') }
   }
 
@@ -69,6 +80,7 @@ export default function DaftarPage() {
       await updateTagihanStatus(t.id, 'belum_bayar')
       showToast('Bukti ditolak, murid perlu upload ulang')
       loadTagihan()
+      loadHistory()
     } catch { showToast('Gagal tolak', 'error') }
   }
 
@@ -144,6 +156,62 @@ export default function DaftarPage() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Toggle History Pembayaran */}
+      <div className="mb-6">
+        <button onClick={() => setShowHistory(!showHistory)}
+          className="flex items-center gap-1.5 text-[12px] text-text-muted hover:text-text mb-3">
+          <i className={`ti ti-chevron-${showHistory ? 'down' : 'right'} text-sm`} />
+          Riwayat Pembayaran ({historyList.length})
+        </button>
+
+        {showHistory && (
+          <>
+            {/* Filter chips — sama seperti pendaftaran murid baru */}
+            <div className="flex gap-2 mb-3">
+              {(['semua', 'lunas', 'belum_bayar'] as const).map((f) => (
+                <button key={f} onClick={() => setHistoryFilter(f)}
+                  className={`px-3 py-1.5 rounded-full text-[12px] font-medium border transition-all ${historyFilter === f ? 'bg-[#185FA5] text-white border-[#185FA5]' : 'border-border text-text-muted hover:border-blue'}`}>
+                  {f === 'semua' ? 'Semua' : f === 'lunas' ? 'Lunas' : 'Belum Bayar'}
+                </button>
+              ))}
+              <button onClick={loadHistory} className="ml-auto text-[12px] text-text-muted flex items-center gap-1 hover:text-text">
+                <i className="ti ti-refresh text-sm" />Refresh
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {historyList
+                .filter((t) => historyFilter === 'semua' || t.status === historyFilter)
+                .map((t) => (
+                <div key={t.id} className="bg-bg border border-border rounded-lg px-3 py-2.5 flex items-center gap-3 shadow-sm">
+                  <Avatar nama={t.murid?.nama ?? '?'} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-semibold text-text">{t.murid?.nama}</div>
+                    <div className="text-[11px] text-text-muted">{t.murid?.paket} · Siklus #{t.siklus} · {t.jumlah_hadir}x hadir</div>
+                  </div>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                    t.status === 'lunas' ? 'bg-green/10 text-green' : 'bg-bg-2 text-text-muted'
+                  }`}>
+                    {t.status === 'lunas' ? '✓ Lunas' : 'Belum bayar'}
+                  </span>
+                  {t.bukti_tf_url && (
+                    <a href={t.bukti_tf_url} target="_blank" className="text-blue flex-shrink-0">
+                      <i className="ti ti-photo text-sm" />
+                    </a>
+                  )}
+                </div>
+              ))}
+
+              {historyList.filter((t) => historyFilter === 'semua' || t.status === historyFilter).length === 0 && (
+                <div className="text-center py-6 text-text-muted text-[12px]">
+                  Tidak ada data {historyFilter === 'semua' ? '' : historyFilter === 'lunas' ? 'yang lunas' : 'yang belum bayar'}
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Divider */}
@@ -237,23 +305,6 @@ export default function DaftarPage() {
         })}
       </div>
 
-      {/* SQL helper */}
-      <div className="mt-6 bg-bg-2 border border-border rounded-md p-3">
-        <div className="text-[11px] font-semibold text-text-muted mb-1.5">SQL setup (jika tabel belum ada):</div>
-        <pre className="text-[10px] text-text-muted whitespace-pre-wrap break-all leading-relaxed">{`-- Jalankan di Supabase SQL Editor
-CREATE TABLE IF NOT EXISTS tagihan (
-  id uuid primary key default gen_random_uuid(),
-  murid_id uuid references murid(id) on delete cascade,
-  siklus integer not null default 1,
-  sesi_ids text[] default '{}',
-  jumlah_hadir integer default 0,
-  status text default 'belum_bayar',
-  bukti_tf_url text,
-  created_at timestamptz default now(),
-  paid_at timestamptz
-);
-ALTER TABLE tagihan DISABLE ROW LEVEL SECURITY;`}</pre>
-      </div>
     </div>
   )
 }

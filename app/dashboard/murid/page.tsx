@@ -1,20 +1,27 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getMurid, addMurid, deleteMurid, Murid } from '@/lib/supabase'
-import { PAKET_LIST, KATEGORI_LIST } from '@/lib/utils'
+import { getMurid, addMurid, updateMurid, deleteMurid, Murid } from '@/lib/supabase'
+import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
 import Avatar from '@/components/ui/Avatar'
 
+const HARI_LIST = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
+const JAM_PRESETS = ['07:00', '08:00', '09:00', '10:00', '15:00', '16:00', '17:00']
+
 export default function MuridPage() {
   const [list, setList] = useState<Murid[]>([])
   const [search, setSearch] = useState('')
+  const [filterHari, setFilterHari] = useState('')
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
-    nama: '', paket: PAKET_LIST[0], wa_ortu: '', kategori: 'normal' as 'normal' | 'abk'
+    nama: '', paket: PAKET_LIST[0], wa_ortu: '', kategori: 'normal' as 'normal' | 'abk',
+    jadwal_hari: '', jadwal_jam: '', jadwal_kolam: KOLAM_PRESETS[0],
   })
+  const [kolamCustom, setKolamCustom] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -25,18 +32,48 @@ export default function MuridPage() {
 
   useEffect(() => { load() }, [])
 
-  const filtered = list.filter((m) =>
-    m.nama.toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = list.filter((m) => {
+    const matchSearch = m.nama.toLowerCase().includes(search.toLowerCase())
+    const matchHari = !filterHari || m.jadwal_hari === filterHari
+    return matchSearch && matchHari
+  })
+
+  // Hitung jumlah murid per hari untuk filter chips
+  const hariCount = HARI_LIST.reduce<Record<string, number>>((acc, h) => {
+    acc[h] = list.filter((m) => m.jadwal_hari === h).length
+    return acc
+  }, {})
+
+  const openEdit = (m: Murid) => {
+    setEditingId(m.id)
+    setForm({
+      nama: m.nama, paket: m.paket, wa_ortu: m.wa_ortu ?? '', kategori: m.kategori,
+      jadwal_hari: m.jadwal_hari ?? '', jadwal_jam: m.jadwal_jam ?? '', jadwal_kolam: m.jadwal_kolam ?? KOLAM_PRESETS[0],
+    })
+    setKolamCustom(!!m.jadwal_kolam && !KOLAM_PRESETS.includes(m.jadwal_kolam))
+    setShowAdd(true)
+  }
+
+  const resetForm = () => {
+    setForm({ nama: '', paket: PAKET_LIST[0], wa_ortu: '', kategori: 'normal', jadwal_hari: '', jadwal_jam: '', jadwal_kolam: KOLAM_PRESETS[0] })
+    setEditingId(null)
+    setKolamCustom(false)
+  }
 
   const handleAdd = async () => {
     if (!form.nama.trim()) { showToast('Nama harus diisi'); return }
+    if (!form.jadwal_hari || !form.jadwal_jam) { showToast('Pilih jadwal hari & jam'); return }
     setSaving(true)
     try {
-      await addMurid(form)
-      showToast('Murid ditambahkan ✓', 'success')
+      if (editingId) {
+        await updateMurid(editingId, form)
+        showToast('Murid diperbarui ✓', 'success')
+      } else {
+        await addMurid(form)
+        showToast('Murid ditambahkan ✓', 'success')
+      }
       setShowAdd(false)
-      setForm({ nama: '', paket: PAKET_LIST[0], wa_ortu: '', kategori: 'normal' })
+      resetForm()
       load()
     } catch (e: any) {
       showToast('Gagal: ' + (e?.message || 'cek konsol'), 'error')
@@ -71,7 +108,7 @@ export default function MuridPage() {
           />
         </div>
         <button
-          onClick={() => setShowAdd(true)}
+          onClick={() => { resetForm(); setShowAdd(true) }}
           className="flex items-center gap-1.5 bg-[#185FA5] text-white px-3 py-2 rounded-md text-sm font-medium"
         >
           <i className="ti ti-plus text-base" />Tambah
@@ -94,6 +131,26 @@ export default function MuridPage() {
         </div>
       </div>
 
+      {/* Filter jadwal hari — pengelompokan */}
+      <div className="mb-4">
+        <div className="text-[12px] text-text-muted mb-2">Filter berdasarkan jadwal hari</div>
+        <div className="flex gap-1.5 flex-wrap">
+          <button onClick={() => setFilterHari('')}
+            className={`px-3 py-1.5 rounded-full border text-[12px] font-medium transition-all ${!filterHari ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
+            Semua
+          </button>
+          {HARI_LIST.map((h) => (
+            <button key={h} onClick={() => setFilterHari(h)}
+              className={`px-3 py-1.5 rounded-full border text-[12px] font-medium transition-all flex items-center gap-1 ${filterHari === h ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
+              {h.slice(0,3)}
+              {hariCount[h] > 0 && (
+                <span className={`text-[10px] ${filterHari === h ? 'text-white/80' : 'text-text-muted/60'}`}>({hariCount[h]})</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {loading && (
         <div className="text-center py-12 text-text-muted text-sm">
           <i className="ti ti-loader-2 text-3xl block mb-2 animate-spin" />Memuat...
@@ -113,8 +170,20 @@ export default function MuridPage() {
                 )}
               </div>
               <div className="text-[12px] text-text-muted">{m.paket}</div>
+              {m.jadwal_hari && (
+                <div className="text-[11px] text-blue mt-0.5 flex items-center gap-1">
+                  <i className="ti ti-calendar-time text-[12px]" />
+                  {m.jadwal_hari} {m.jadwal_jam} · {m.jadwal_kolam}
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => openEdit(m)}
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all"
+              >
+                <i className="ti ti-edit text-base" />
+              </button>
               {m.wa_ortu && (
                 <a
                   href={`https://wa.me/62${m.wa_ortu.replace(/^0/, '')}`}
@@ -138,12 +207,12 @@ export default function MuridPage() {
       {!loading && filtered.length === 0 && (
         <div className="text-center py-12 text-text-muted">
           <i className="ti ti-users text-4xl block mb-2 opacity-40" />
-          <p className="text-sm">{search ? 'Murid tidak ditemukan' : 'Belum ada murid aktif'}</p>
+          <p className="text-sm">{search || filterHari ? 'Murid tidak ditemukan' : 'Belum ada murid aktif'}</p>
         </div>
       )}
 
       {/* Modal tambah */}
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Tambah Murid Baru">
+      <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title={editingId ? "Edit Murid" : "Tambah Murid Baru"}>
         <div className="flex flex-col gap-3">
           <div>
             <label className="text-[12px] text-text-muted block mb-1">Nama murid</label>
@@ -173,6 +242,53 @@ export default function MuridPage() {
             </div>
           </div>
 
+          {/* Jadwal tetap — INI YANG BARU */}
+          <div className="bg-blue-light/40 border border-blue/10 rounded-lg p-3">
+            <div className="text-[12px] font-semibold text-blue mb-2 flex items-center gap-1.5">
+              <i className="ti ti-calendar-time text-sm" />Jadwal Tetap Mingguan
+            </div>
+
+            <label className="text-[11px] text-text-muted block mb-1.5">Hari</label>
+            <div className="grid grid-cols-4 gap-1.5 mb-3">
+              {HARI_LIST.map((h) => (
+                <button key={h} onClick={() => setForm({ ...form, jadwal_hari: h })}
+                  className={`py-1.5 rounded-md border text-[11px] font-medium transition-all ${form.jadwal_hari === h ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
+                  {h.slice(0,3)}
+                </button>
+              ))}
+            </div>
+
+            <label className="text-[11px] text-text-muted block mb-1.5">Jam</label>
+            <div className="grid grid-cols-4 gap-1.5 mb-3">
+              {JAM_PRESETS.map((j) => (
+                <button key={j} onClick={() => setForm({ ...form, jadwal_jam: j })}
+                  className={`py-1.5 rounded-md border text-[11px] font-medium transition-all ${form.jadwal_jam === j ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
+                  {j}
+                </button>
+              ))}
+            </div>
+
+            <label className="text-[11px] text-text-muted block mb-1.5">Kolam</label>
+            <div className="flex gap-1.5 flex-wrap">
+              {KOLAM_PRESETS.map((k) => (
+                <button key={k} onClick={() => { setForm({ ...form, jadwal_kolam: k }); setKolamCustom(false) }}
+                  className={`px-2.5 py-1.5 rounded-full border text-[11px] font-medium transition-all ${form.jadwal_kolam === k && !kolamCustom ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
+                  {k}
+                </button>
+              ))}
+              <button onClick={() => setKolamCustom(true)}
+                className={`px-2.5 py-1.5 rounded-full border text-[11px] font-medium transition-all ${kolamCustom ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
+                + Custom
+              </button>
+            </div>
+            {kolamCustom && (
+              <input type="text" placeholder="Nama kolam custom"
+                value={form.jadwal_kolam}
+                onChange={(e) => setForm({ ...form, jadwal_kolam: e.target.value })}
+                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text mt-2" />
+            )}
+          </div>
+
           <div>
             <label className="text-[12px] text-text-muted block mb-2">Kategori murid</label>
             <div className="grid grid-cols-2 gap-2">
@@ -190,7 +306,7 @@ export default function MuridPage() {
 
           <button onClick={handleAdd} disabled={saving}
             className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-sm font-semibold mt-1 hover:bg-[#0C447C] disabled:opacity-50 transition-all">
-            {saving ? 'Menyimpan...' : 'Tambah Murid'}
+            {saving ? 'Menyimpan...' : (editingId ? 'Simpan Perubahan' : 'Tambah Murid')}
           </button>
         </div>
       </Modal>

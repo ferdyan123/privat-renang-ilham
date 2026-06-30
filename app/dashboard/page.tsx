@@ -14,6 +14,7 @@ export default function HariIniPage() {
   const [loading, setLoading] = useState(true)
   const [showTambah, setShowTambah] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [savingSesi, setSavingSesi] = useState<string | null>(null)
 
   const [jam, setJam] = useState('07')
   const [menit, setMenit] = useState('00')
@@ -46,14 +47,16 @@ export default function HariIniPage() {
 
   useEffect(() => { load() }, [])
 
-  const toggleStatus = (sesiId: string, muridId: string) => {
-    const cur = absenMap[sesiId]?.[muridId] ?? 'alpha'
-    const next: Absensi['status'] = cur === 'alpha' ? 'hadir' : cur === 'hadir' ? 'izin' : 'alpha'
-    setAbsenMap((prev) => ({ ...prev, [sesiId]: { ...prev[sesiId], [muridId]: next } }))
+  // Set status langsung dari klik tombol spesifik (bukan toggle berputar)
+  const setStatus = (sesiId: string, muridId: string, status: Absensi['status']) => {
+    setAbsenMap((prev) => ({
+      ...prev,
+      [sesiId]: { ...prev[sesiId], [muridId]: status }
+    }))
   }
 
   const saveAbsen = async (sesiId: string) => {
-    setSaving(true)
+    setSavingSesi(sesiId)
     try {
       const records = muridList.map((m) => ({
         sesi_id: sesiId,
@@ -66,7 +69,7 @@ export default function HariIniPage() {
       showToast('Gagal simpan: ' + (e?.message || ''), 'error')
       console.error(e)
     }
-    finally { setSaving(false) }
+    finally { setSavingSesi(null) }
   }
 
   const tambahSesi = async () => {
@@ -83,16 +86,22 @@ export default function HariIniPage() {
     finally { setSaving(false) }
   }
 
-  const statusColor = (s: Absensi['status'] | undefined) => {
-    if (s === 'hadir') return 'bg-blue-light text-blue border-blue/30'
-    if (s === 'izin')  return 'bg-yellow/10 text-yellow border-yellow/30'
-    return 'bg-bg-2 text-text-muted border-border'
-  }
-  const statusLabel = (s: Absensi['status'] | undefined) =>
-    s === 'hadir' ? '✓ Hadir' : s === 'izin' ? 'I Izin' : '✗ Alpha'
-
   const hadirCount = (sesiId: string) =>
     muridList.filter((m) => absenMap[sesiId]?.[m.id] === 'hadir').length
+
+  // Konfigurasi 3 tombol status
+  const STATUS_BTNS: { key: Absensi['status']; label: string; icon: string }[] = [
+    { key: 'hadir', label: 'Hadir', icon: 'ti-check' },
+    { key: 'izin',  label: 'Izin',  icon: 'ti-clock-pause' },
+    { key: 'alpha', label: 'Alpha', icon: 'ti-x' },
+  ]
+
+  const btnActiveClass = (status: Absensi['status'], current: Absensi['status'] | undefined) => {
+    const isActive = current === status
+    if (status === 'hadir') return isActive ? 'bg-blue text-white border-blue' : 'border-border text-text-muted hover:border-blue/40'
+    if (status === 'izin')  return isActive ? 'bg-yellow text-white border-yellow' : 'border-border text-text-muted hover:border-yellow/40'
+    return isActive ? 'bg-red text-white border-red' : 'border-border text-text-muted hover:border-red/40'
+  }
 
   return (
     <div className="max-w-[720px] mx-auto">
@@ -148,24 +157,46 @@ export default function HariIniPage() {
                 </div>
               </div>
             </div>
-            <div className="p-3 flex flex-col gap-1.5">
+
+            {/* List murid dengan 3 tombol status */}
+            <div className="p-3 flex flex-col gap-2">
               {muridList.map((m) => {
                 const st = absenMap[s.id]?.[m.id]
                 return (
-                  <button key={m.id} onClick={() => toggleStatus(s.id, m.id)}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-md border transition-all ${statusColor(st)}`}>
+                  <div key={m.id} className="flex items-center gap-2.5 px-2 py-1.5">
                     <Avatar nama={m.nama} size="sm" />
-                    <span className="text-[13px] font-medium flex-1 text-left">{m.nama}</span>
-                    {m.kategori === 'abk' && <span className="text-[10px] bg-yellow/10 text-yellow px-1.5 py-0.5 rounded-full">ABK</span>}
-                    <span className="text-[12px] font-semibold">{statusLabel(st)}</span>
-                  </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-medium text-text truncate flex items-center gap-1.5">
+                        {m.nama}
+                        {m.kategori === 'abk' && <span className="text-[9px] bg-yellow/10 text-yellow px-1 py-0.5 rounded-full flex-shrink-0">ABK</span>}
+                      </div>
+                    </div>
+                    {/* 3 tombol status — H / I / A */}
+                    <div className="flex gap-1 flex-shrink-0">
+                      {STATUS_BTNS.map((btn) => (
+                        <button
+                          key={btn.key}
+                          onClick={() => setStatus(s.id, m.id, btn.key)}
+                          title={btn.label}
+                          className={`w-8 h-8 rounded-md border flex items-center justify-center transition-all ${btnActiveClass(btn.key, st)}`}
+                        >
+                          <i className={`ti ${btn.icon} text-[15px]`} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )
               })}
             </div>
+
             <div className="px-4 pb-4">
-              <button onClick={() => saveAbsen(s.id)} disabled={saving}
+              <button onClick={() => saveAbsen(s.id)} disabled={savingSesi === s.id}
                 className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-[14px] font-semibold hover:bg-[#0C447C] transition-all disabled:opacity-50">
-                <i className="ti ti-device-floppy mr-1.5" />Simpan Absensi
+                {savingSesi === s.id ? (
+                  <><i className="ti ti-loader-2 animate-spin mr-1.5" />Menyimpan...</>
+                ) : (
+                  <><i className="ti ti-device-floppy mr-1.5" />Simpan Absensi</>
+                )}
               </button>
             </div>
           </div>

@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getSesi, addSesiBatch, deleteSesi, Sesi } from '@/lib/supabase'
+import { getSesi, addSesiBatch, updateSesi, deleteSesi, Sesi } from '@/lib/supabase'
 import { fmtTgl, fmtShort, jamSelesai, KOLAM_PRESETS } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
@@ -9,6 +9,7 @@ export default function JadwalPage() {
   const [sesiList, setSesiList] = useState<Sesi[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   // Form state
@@ -41,10 +42,36 @@ export default function JadwalPage() {
   }, {})
   const sortedDates = Object.keys(grouped).sort().reverse()
 
+  const openEdit = (s: Sesi) => {
+    setEditingId(s.id)
+    setTgl(s.tanggal)
+    setJam(s.jam)
+    setMenit(s.menit)
+    setDurasi(s.durasi)
+    setKolam(s.kolam)
+    setRepeat(false)
+    setShowAdd(true)
+  }
+
+  const resetForm = () => {
+    setTgl(''); setJam('07'); setMenit('00'); setDurasi(60); setKolam('Kolam A')
+    setRepeat(false); setRepeatDays([]); setRepeatWeeks(4)
+    setEditingId(null)
+  }
+
   const handleAdd = async () => {
     if (!tgl) { showToast('Pilih tanggal'); return }
     setSaving(true)
     try {
+      if (editingId) {
+        await updateSesi(editingId, { tanggal: tgl, jam, menit, durasi, kolam })
+        showToast('Sesi diperbarui ✓', 'success')
+        setShowAdd(false)
+        resetForm()
+        load()
+        setSaving(false)
+        return
+      }
       if (!repeat) {
         await addSesiBatch([{ tanggal: tgl, jam, menit, durasi, kolam }])
       } else {
@@ -83,7 +110,7 @@ export default function JadwalPage() {
     <div className="max-w-[720px] mx-auto">
       <div className="flex justify-end mb-4">
         <button
-          onClick={() => setShowAdd(true)}
+          onClick={() => { resetForm(); setShowAdd(true) }}
           className="flex items-center gap-1.5 bg-[#185FA5] text-white px-3 py-2 rounded-md text-sm font-medium"
         >
           <i className="ti ti-plus text-base" />Tambah Sesi
@@ -113,6 +140,10 @@ export default function JadwalPage() {
                   </div>
                   <div className="text-[12px] text-text-muted">{s.kolam} · {s.durasi} menit</div>
                 </div>
+                <button onClick={() => openEdit(s)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
+                  <i className="ti ti-edit text-base" />
+                </button>
                 <button onClick={() => handleDelete(s)}
                   className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
                   <i className="ti ti-trash text-base" />
@@ -130,7 +161,7 @@ export default function JadwalPage() {
         </div>
       )}
 
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Tambah Sesi Baru">
+      <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title={editingId ? "Edit Sesi" : "Tambah Sesi Baru"}>
         <div className="flex flex-col gap-3">
           <div>
             <label className="text-[12px] text-text-muted block mb-1">Tanggal</label>
@@ -183,7 +214,8 @@ export default function JadwalPage() {
             )}
           </div>
 
-          {/* Repeat toggle */}
+          {/* Repeat toggle — hanya untuk sesi baru */}
+          {!editingId && (
           <label className="flex items-center gap-2 cursor-pointer">
             <div onClick={() => setRepeat(!repeat)}
               className={`w-10 h-5 rounded-full transition-all relative ${repeat ? 'bg-blue' : 'bg-border'}`}>
@@ -192,7 +224,9 @@ export default function JadwalPage() {
             <span className="text-[13px] text-text">Ulangi mingguan</span>
           </label>
 
-          {repeat && (
+          )}
+
+          {repeat && !editingId && (
             <>
               <div>
                 <label className="text-[12px] text-text-muted block mb-1">Hari</label>
@@ -221,7 +255,7 @@ export default function JadwalPage() {
 
           <button onClick={handleAdd} disabled={saving}
             className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-sm font-semibold mt-1 hover:bg-[#0C447C] disabled:opacity-50 transition-all">
-            {saving ? 'Menyimpan...' : 'Tambah Sesi'}
+            {saving ? 'Menyimpan...' : (editingId ? 'Simpan Perubahan' : 'Tambah Sesi')}
           </button>
         </div>
       </Modal>

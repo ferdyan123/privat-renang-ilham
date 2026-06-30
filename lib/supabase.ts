@@ -13,6 +13,9 @@ export interface Murid {
   paket: string
   wa_ortu: string
   kategori: 'normal' | 'abk'
+  jadwal_hari: string | null
+  jadwal_jam: string | null
+  jadwal_kolam: string | null
   aktif: boolean
 }
 
@@ -283,4 +286,25 @@ export const konfirmasiPembayaran = async (id: string) => {
     .update({ status: 'lunas', confirmed_at: new Date().toISOString() })
     .eq('id', id)
   if (error) throw error
+}
+
+export const updateMurid = async (id: string, payload: Partial<Omit<Murid, 'id'>>) => {
+  const { error } = await supabase.from('murid').update(payload).eq('id', id)
+  if (error) throw error
+}
+
+export const updateSesi = async (id: string, payload: Partial<Omit<Sesi, 'id'>>) => {
+  const { error } = await supabase.from('sesi').update(payload).eq('id', id)
+  if (error) throw error
+}
+
+export const getTagihanHistory = async (): Promise<(Tagihan & { murid: { nama: string; wa_ortu: string; paket: string } })[]> => {
+  const { data, error } = await supabase
+    .from('tagihan')
+    .select('*, murid:murid_id(nama, wa_ortu, paket)')
+    .in('status', ['lunas', 'belum_bayar'])
+    .order('created_at', { ascending: false })
+    .limit(50)
+  if (error) throw error
+  return data as any
 }
