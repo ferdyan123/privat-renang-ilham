@@ -308,3 +308,24 @@ export const getTagihanHistory = async (): Promise<(Tagihan & { murid: { nama: s
   if (error) throw error
   return data as any
 }
+
+// ── Cek semua murid yang sudah siap tagih (untuk notifikasi otomatis) ─────
+export const getMuridSiapTagih = async (): Promise<{
+  murid: Murid
+  jumlahHadir: number
+  jumlahTarget: number
+}[]> => {
+  const muridAll = await getMurid()
+  const results = []
+  for (const m of muridAll) {
+    const info = await getSiklusBerjalan(m.id, m.paket)
+    if (info.siapTagih) {
+      results.push({
+        murid: m,
+        jumlahHadir: info.sesiHadir.length,
+        jumlahTarget: info.jumlahTarget,
+      })
+    }
+  }
+  return results
+}

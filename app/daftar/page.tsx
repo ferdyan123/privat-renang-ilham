@@ -1,38 +1,64 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { PAKET_LIST, PAKET_HARGA } from '@/lib/utils'
 import { ToastProvider, showToast } from '@/components/ui/Toast'
 
-const JADWAL_HARI = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
-const JADWAL_JAM  = ['07:00', '08:00', '09:00', '10:00', '15:00', '16:00']
-const NOREK = { bank: 'BCA', nomor: '1234567890', atas_nama: 'SwimTrack Les Renang' }
-const STEP_LABELS = ['Data Murid', 'Paket & Jadwal', 'Pembayaran']
+const REKENING = {
+  nama: 'Muhammad Nurilham Aulia Rahman',
+  bank: 'Sea Bank',
+  nomor: '901452432623',
+}
+
+const KELAS_LIST = [
+  { id: 'semi_privat', label: 'Semi Privat', desc: 'Belajar bersama 2-3 anak seusia' },
+  { id: 'eksklusif', label: 'Eksklusif', desc: 'Sesi khusus 1-on-1 dengan instruktur' },
+]
+
+const HARI_LIST = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
+const JAM_LIST = ['07:00', '08:00', '09:00', '10:00', '15:00', '16:00', '17:00']
+const STEP_LABELS = ['Biodata', 'Kelas & Jadwal', 'Pembayaran']
+
+// Tata letak ilustrasi — abstrak, tengah maju mendekati form
+const ILUSTRASI = [
+  // Kiri atas — agak jauh
+  { src: '/ilustrasi/swim4.png', style: { top: '8%',   left: '2%',   width: 100, opacity: 0.28, transform: 'rotate(-12deg)' } },
+  // Kiri tengah — maju ke dalam mendekati form
+  { src: '/ilustrasi/swim1.png', style: { top: '38%',  left: '8%',   width: 140, opacity: 0.33, transform: 'rotate(5deg)' } },
+  // Kiri bawah — agak masuk
+  { src: '/ilustrasi/swim3.png', style: { bottom: '5%',left: '4%',   width: 115, opacity: 0.30, transform: 'rotate(-8deg)' } },
+  // Kanan atas — agak jauh + naik
+  { src: '/ilustrasi/swim6.png', style: { top: '6%',   right: '3%',  width: 95,  opacity: 0.26, transform: 'rotate(14deg)' } },
+  // Kanan tengah — maju ke dalam mendekati form
+  { src: '/ilustrasi/swim5.png', style: { top: '40%',  right: '7%',  width: 125, opacity: 0.33, transform: 'rotate(-7deg)' } },
+  // Kanan bawah — agak masuk + besar
+  { src: '/ilustrasi/swim2.png', style: { bottom: '3%',right: '2%',  width: 155, opacity: 0.36, transform: 'rotate(4deg)' } },
+]
 
 export default function DaftarPublikPage() {
   const [step, setStep] = useState(0)
   const [done, setDone] = useState(false)
   const [saving, setSaving] = useState(false)
-
-  const [form, setForm] = useState({
-    nama_murid: '', usia: '', nama_ortu: '', wa_ortu: '',
-    paket: PAKET_LIST[0], jadwal_hari: '', jadwal_jam: '', catatan: '',
-  })
   const [buktiFile, setBuktiFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
+
+  const [form, setForm] = useState({
+    nama_murid: '', usia: '', jenis_kelamin: '', kategori: '',
+    paket: '', jadwal_hari: '', jadwal_jam: '', catatan: '',
+    nama_ortu: '', wa_ortu: '',
+  })
 
   const up = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   const stepValid = () => {
-    if (step === 0) return form.nama_murid.trim() && form.usia && form.nama_ortu.trim() && form.wa_ortu.trim()
-    if (step === 1) return form.jadwal_hari && form.jadwal_jam
+    if (step === 0) return form.nama_murid.trim() && form.usia && form.jenis_kelamin && form.kategori && form.nama_ortu.trim() && form.wa_ortu.trim()
+    if (step === 1) return form.paket && form.jadwal_hari && form.jadwal_jam
     return true
   }
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (!f) return
-    if (f.size > 5 * 1024 * 1024) { showToast('Ukuran file max 5MB', 'error'); return }
+    if (f.size > 5 * 1024 * 1024) { showToast('Max 5MB', 'error'); return }
     setBuktiFile(f)
     setPreview(URL.createObjectURL(f))
   }
@@ -41,20 +67,24 @@ export default function DaftarPublikPage() {
     setSaving(true)
     try {
       let bukti_tf_url: string | null = null
-
       if (buktiFile) {
         const ext = buktiFile.name.split('.').pop()
-        const path = `bukti/${Date.now()}.${ext}`
+        const path = `pendaftaran/${Date.now()}.${ext}`
         const { error: upErr } = await supabase.storage.from('bukti-tf').upload(path, buktiFile)
         if (upErr) throw upErr
         const { data } = supabase.storage.from('bukti-tf').getPublicUrl(path)
         bukti_tf_url = data.publicUrl
       }
-
       const { error } = await supabase.from('pending_members').insert({
-        ...form,
+        nama_murid: form.nama_murid,
         usia: parseInt(form.usia),
+        nama_ortu: form.nama_ortu,
+        wa_ortu: form.wa_ortu,
+        paket: form.paket + (form.kategori === 'abk' ? ' +ABK' : ''),
+        jadwal_hari: form.jadwal_hari,
+        jadwal_jam: form.jadwal_jam,
         bukti_tf_url,
+        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori}${form.catatan ? ' | ' + form.catatan : ''}`,
         status: 'menunggu',
       })
       if (error) throw error
@@ -64,209 +94,315 @@ export default function DaftarPublikPage() {
     } finally { setSaving(false) }
   }
 
+  // ── Halaman sukses ──────────────────────────────────────────
   if (done) return (
-    <div className="min-h-screen bg-bg-2 flex items-center justify-center p-4">
-      <div className="bg-bg rounded-xl p-8 text-center max-w-sm w-full shadow-sm border border-border">
-        <div className="w-16 h-16 bg-green/10 rounded-full flex items-center justify-center mx-auto mb-4">
-          <i className="ti ti-check text-4xl text-green" />
+    <div className="min-h-screen bg-[#E6F4FB] flex items-center justify-center p-4 relative overflow-hidden">
+      {ILUSTRASI.slice(0,3).map((il, i) => (
+        <img key={i} src={il.src} alt="" className="absolute pointer-events-none select-none"
+          style={{ ...il.style as any, position: 'fixed' }} />
+      ))}
+      <div className="relative z-10 bg-white rounded-2xl p-8 text-center max-w-sm w-full shadow-md">
+        <div className="text-5xl mb-3">🎉</div>
+        <div className="text-[20px] font-bold text-gray-800 mb-2">Pendaftaran Berhasil!</div>
+        <div className="text-[14px] text-gray-500 mb-4">
+          Halo <strong>{form.nama_ortu}</strong>!<br/>
+          Pendaftaran <strong>{form.nama_murid}</strong> sudah kami terima dengan baik.
         </div>
-        <div className="text-[18px] font-bold text-text mb-2">Pendaftaran Terkirim!</div>
-        <div className="text-[14px] text-text-muted mb-1">Halo, <strong>{form.nama_ortu}</strong></div>
-        <div className="text-[13px] text-text-muted">
-          Pendaftaran <strong>{form.nama_murid}</strong> sudah kami terima. Admin akan menghubungi Anda melalui WhatsApp untuk konfirmasi.
+        <div className="bg-[#E6F4FB] rounded-xl p-4 text-left text-[13px] text-gray-600 mb-4 space-y-1">
+          <div className="font-semibold text-[#185FA5] mb-1.5">Ringkasan Pendaftaran</div>
+          <div>Kelas: <strong>{form.paket}</strong></div>
+          <div>Jadwal: <strong>{form.jadwal_hari} · {form.jadwal_jam}</strong></div>
+          <div>Kategori: <strong>{form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'}</strong></div>
         </div>
-        <div className="mt-6 bg-bg-2 rounded-md p-3 text-left text-[12px] text-text-muted">
-          <div className="font-semibold text-text mb-1">Ringkasan</div>
-          <div>Paket: {form.paket}</div>
-          <div>Jadwal: {form.jadwal_hari} · {form.jadwal_jam}</div>
+        <div className="text-[12px] text-gray-400 leading-relaxed">
+          Admin akan menghubungi melalui WhatsApp untuk konfirmasi.<br/>
+          Kita siap bantu si kecil belajar renang dengan penuh semangat! 💦
         </div>
       </div>
       <ToastProvider />
     </div>
   )
 
+  // ── Main form ───────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-bg-2">
-      {/* Header */}
-      <div className="bg-[#185FA5] px-5 pt-8 pb-6">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-9 h-9 bg-white/20 rounded-lg flex items-center justify-center">
-            <i className="ti ti-ripple text-white text-xl" />
-          </div>
-          <div>
-            <div className="text-white text-[15px] font-semibold">SwimTrack</div>
-            <div className="text-white/70 text-[12px]">Pendaftaran Les Renang</div>
-          </div>
-        </div>
-        {/* Stepper */}
-        <div className="flex items-center gap-0">
-          {STEP_LABELS.map((l, i) => (
-            <div key={l} className="flex items-center flex-1 last:flex-none">
-              <div className="flex flex-col items-center">
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold transition-all ${i <= step ? 'bg-white text-blue' : 'bg-white/20 text-white/60'}`}>
-                  {i < step ? <i className="ti ti-check text-sm" /> : i + 1}
-                </div>
-                <div className={`text-[10px] mt-1 whitespace-nowrap ${i <= step ? 'text-white' : 'text-white/50'}`}>{l}</div>
-              </div>
-              {i < STEP_LABELS.length - 1 && (
-                <div className={`flex-1 h-0.5 mb-4 mx-1 transition-all ${i < step ? 'bg-white' : 'bg-white/20'}`} />
-              )}
+    <div className="min-h-screen bg-[#E6F4FB] relative overflow-x-hidden">
+
+      {/* Background ilustrasi — posisi fixed agar tetap saat scroll */}
+      {ILUSTRASI.map((il, i) => (
+        <img key={i} src={il.src} alt="" className="fixed pointer-events-none select-none"
+          style={{ ...il.style as any }} />
+      ))}
+
+      {/* Header — sama ukuran dengan kartu kehadiran */}
+      <div className="relative bg-[#185FA5] overflow-hidden" style={{height:90}}>
+        {/* Gelombang */}
+        <svg className="absolute bottom-0 left-0 w-full" viewBox="0 0 400 30" preserveAspectRatio="none" style={{height:22}}>
+          <path fill="rgba(255,255,255,0.15)" d="M0,15 C60,25 120,5 180,15 C240,25 300,5 400,15 L400,30 L0,30 Z">
+            <animate attributeName="d" dur="4s" repeatCount="indefinite"
+              values="M0,15 C60,25 120,5 180,15 C240,25 300,5 400,15 L400,30 L0,30 Z;
+                      M0,10 C70,22 130,3 200,13 C270,23 340,5 400,10 L400,30 L0,30 Z;
+                      M0,15 C60,25 120,5 180,15 C240,25 300,5 400,15 L400,30 L0,30 Z"/>
+          </path>
+        </svg>
+        {/* Logo + stepper dalam satu baris */}
+        <div className="absolute inset-0 flex items-center px-5 gap-4">
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+              <i className="ti ti-ripple text-white text-lg" />
             </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="max-w-[500px] mx-auto px-4 py-5">
-
-        {/* STEP 0: Data Murid */}
-        {step === 0 && (
-          <div className="flex flex-col gap-3">
-            <div className="text-[15px] font-semibold text-text mb-1">Data Murid</div>
-            {[
-              { label: 'Nama lengkap murid', key: 'nama_murid', type: 'text', placeholder: 'Nama anak' },
-              { label: 'Usia (tahun)', key: 'usia', type: 'number', placeholder: 'Contoh: 8' },
-              { label: 'Nama orang tua / wali', key: 'nama_ortu', type: 'text', placeholder: 'Nama lengkap' },
-              { label: 'No. WhatsApp orang tua', key: 'wa_ortu', type: 'tel', placeholder: '08xxxxxxxxxx' },
-            ].map((f) => (
-              <div key={f.key}>
-                <label className="text-[12px] text-text-muted block mb-1">{f.label}</label>
-                <input type={f.type} placeholder={f.placeholder}
-                  value={form[f.key as keyof typeof form]}
-                  onChange={(e) => up(f.key, e.target.value)}
-                  className="w-full border border-border rounded-md px-3 py-2.5 text-sm bg-bg text-text" />
+            <div>
+              <div className="text-white text-[13px] font-bold leading-tight">SwimTrack</div>
+              <div className="text-white/60 text-[10px]">Pendaftaran Les Renang</div>
+            </div>
+          </div>
+          {/* Stepper compact horizontal */}
+          <div className="flex items-center flex-1 ml-2">
+            {STEP_LABELS.map((l, i) => (
+              <div key={l} className="flex items-center flex-1 last:flex-none">
+                <div className="flex flex-col items-center">
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${i <= step ? 'bg-white text-[#185FA5]' : 'bg-white/20 text-white/50'}`}>
+                    {i < step ? '✓' : i + 1}
+                  </div>
+                  <div className={`text-[8px] mt-0.5 whitespace-nowrap ${i <= step ? 'text-white' : 'text-white/40'}`}>{l}</div>
+                </div>
+                {i < STEP_LABELS.length - 1 && (
+                  <div className={`flex-1 h-px mx-1 mb-3.5 ${i < step ? 'bg-white' : 'bg-white/20'}`} />
+                )}
               </div>
             ))}
           </div>
-        )}
+        </div>
+      </div>
 
-        {/* STEP 1: Paket & Jadwal */}
-        {step === 1 && (
-          <div className="flex flex-col gap-4">
-            <div className="text-[15px] font-semibold text-text mb-1">Pilih Paket & Jadwal</div>
-            <div>
-              <label className="text-[12px] text-text-muted block mb-2">Paket</label>
-              <div className="flex flex-col gap-2">
-                {PAKET_LIST.map((p) => (
-                  <button key={p} onClick={() => up('paket', p)}
-                    className={`text-left px-4 py-3 rounded-lg border transition-all ${form.paket === p ? 'border-blue bg-blue-light' : 'border-border bg-bg'}`}>
-                    <div className="text-[13px] font-semibold text-text">{p}</div>
-                    <div className="text-[12px] text-text-muted">
-                      Rp {(PAKET_HARGA[p] ?? 0).toLocaleString('id-ID')}/bulan
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-[12px] text-text-muted block mb-2">Hari latihan</label>
-              <div className="grid grid-cols-3 gap-2">
-                {JADWAL_HARI.map((h) => (
-                  <button key={h} onClick={() => up('jadwal_hari', h)}
-                    className={`py-2 rounded-md border text-[13px] font-medium transition-all ${form.jadwal_hari === h ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
-                    {h}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-[12px] text-text-muted block mb-2">Jam</label>
-              <div className="grid grid-cols-3 gap-2">
-                {JADWAL_JAM.map((j) => (
-                  <button key={j} onClick={() => up('jadwal_jam', j)}
-                    className={`py-2 rounded-md border text-[13px] font-medium transition-all ${form.jadwal_jam === j ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
-                    {j}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-[12px] text-text-muted block mb-1">Catatan (opsional)</label>
-              <textarea placeholder="Kondisi khusus, alergi, dll." value={form.catatan}
-                onChange={(e) => up('catatan', e.target.value)}
-                className="w-full border border-border rounded-md px-3 py-2.5 text-sm bg-bg text-text resize-none" rows={3} />
-            </div>
-          </div>
-        )}
+      {/* Form card */}
+      <div className="relative z-10 max-w-[500px] mx-auto px-4 py-5">
+        <div className="bg-white rounded-2xl shadow-sm p-5">
 
-        {/* STEP 2: Pembayaran */}
-        {step === 2 && (
-          <div className="flex flex-col gap-4">
-            <div className="text-[15px] font-semibold text-text mb-1">Pembayaran</div>
-
-            {/* Ringkasan */}
-            <div className="bg-blue-light border border-blue/20 rounded-lg p-4">
-              <div className="text-[13px] font-semibold text-blue mb-2">Ringkasan Pendaftaran</div>
-              <div className="flex flex-col gap-1 text-[13px]">
-                <div className="flex justify-between"><span className="text-text-muted">Murid</span><span className="font-medium text-text">{form.nama_murid}</span></div>
-                <div className="flex justify-between"><span className="text-text-muted">Paket</span><span className="font-medium text-text">{form.paket}</span></div>
-                <div className="flex justify-between"><span className="text-text-muted">Jadwal</span><span className="font-medium text-text">{form.jadwal_hari} · {form.jadwal_jam}</span></div>
-                <div className="flex justify-between border-t border-blue/20 mt-1 pt-1">
-                  <span className="font-semibold text-text">Total</span>
-                  <span className="font-bold text-blue">Rp {(PAKET_HARGA[form.paket] ?? 0).toLocaleString('id-ID')}</span>
+          {/* STEP 0: Biodata */}
+          {step === 0 && (
+            <div className="flex flex-col gap-3.5">
+              <div className="text-[14px] font-bold text-gray-800 flex items-center gap-2 pb-1 border-b border-gray-100">
+                📝 Biodata Peserta
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Nama Lengkap</label>
+                <input type="text" placeholder="Nama lengkap anak" value={form.nama_murid}
+                  onChange={(e) => up('nama_murid', e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-gray-800 focus:outline-none focus:border-[#185FA5] focus:ring-1 focus:ring-[#185FA5]/20" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Usia (tahun)</label>
+                  <input type="number" placeholder="Contoh: 7" value={form.usia}
+                    onChange={(e) => up('usia', e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-gray-800 focus:outline-none focus:border-[#185FA5]" />
                 </div>
-              </div>
-            </div>
-
-            {/* Nomor rekening */}
-            <div className="bg-bg border border-border rounded-lg p-4">
-              <div className="text-[13px] font-semibold text-text mb-3">Transfer ke rekening</div>
-              <div className="flex flex-col gap-1.5 text-[13px]">
-                <div className="flex justify-between"><span className="text-text-muted">Bank</span><span className="font-semibold text-text">{NOREK.bank}</span></div>
-                <div className="flex justify-between items-center">
-                  <span className="text-text-muted">Nomor rekening</span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-text tracking-wider">{NOREK.nomor}</span>
-                    <button onClick={() => { navigator.clipboard.writeText(NOREK.nomor); showToast('Nomor disalin ✓', 'success') }}
-                      className="text-blue"><i className="ti ti-copy text-sm" /></button>
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Jenis Kelamin</label>
+                  <div className="flex gap-1.5 mt-1">
+                    {[{v:'Laki-laki',e:'👦',s:'L'},{v:'Perempuan',e:'👧',s:'P'}].map((jk) => (
+                      <button key={jk.v} onClick={() => up('jenis_kelamin', jk.v)}
+                        className={`flex-1 py-2 rounded-xl border text-[12px] font-semibold transition-all ${form.jenis_kelamin === jk.v ? 'bg-[#185FA5] text-white border-[#185FA5]' : 'border-gray-200 text-gray-500'}`}>
+                        {jk.e} {jk.s}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <div className="flex justify-between"><span className="text-text-muted">Atas nama</span><span className="font-medium text-text">{NOREK.atas_nama}</span></div>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Kategori</label>
+                <div className="flex flex-col gap-2">
+                  <button onClick={() => up('kategori', 'normal')}
+                    className={`text-left px-3.5 py-3 rounded-xl border-2 transition-all ${form.kategori === 'normal' ? 'border-[#185FA5] bg-[#E6F4FB]' : 'border-gray-100 bg-gray-50'}`}>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xl">🏊</span>
+                      <div>
+                        <div className="text-[13px] font-semibold text-gray-800">Anak Normal</div>
+                        <div className="text-[11px] text-gray-400">Program renang reguler</div>
+                      </div>
+                      {form.kategori === 'normal' && <i className="ti ti-check text-[#185FA5] ml-auto" />}
+                    </div>
+                  </button>
+                  <button onClick={() => up('kategori', 'abk')}
+                    className={`text-left px-3.5 py-3 rounded-xl border-2 transition-all ${form.kategori === 'abk' ? 'border-yellow-400 bg-yellow-50' : 'border-gray-100 bg-gray-50'}`}>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xl">⭐</span>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="text-[13px] font-semibold text-gray-800">Anak ABK</div>
+                          <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full font-bold">+Rp 50.000</span>
+                        </div>
+                        <div className="text-[11px] text-gray-400">Autisme, ADHD, speech delay, dsb</div>
+                      </div>
+                      {form.kategori === 'abk' && <i className="ti ti-check text-yellow-500" />}
+                    </div>
+                  </button>
+                </div>
+              </div>
+              <div className="border-t border-gray-100 pt-3">
+                <div className="text-[14px] font-bold text-gray-800 mb-3">Data Orang Tua / Wali</div>
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Nama Lengkap</label>
+                    <input type="text" placeholder="Nama orang tua/wali" value={form.nama_ortu}
+                      onChange={(e) => up('nama_ortu', e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-gray-800 focus:outline-none focus:border-[#185FA5]" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">No. WhatsApp</label>
+                    <input type="tel" placeholder="08xxxxxxxxxx" value={form.wa_ortu}
+                      onChange={(e) => up('wa_ortu', e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-gray-800 focus:outline-none focus:border-[#185FA5]" />
+                  </div>
+                </div>
               </div>
             </div>
+          )}
 
-            {/* Upload bukti */}
-            <div>
-              <label className="text-[12px] text-text-muted block mb-1">Upload bukti transfer</label>
-              <label className={`block border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-all ${preview ? 'border-green' : 'border-border hover:border-blue'}`}>
-                <input type="file" accept="image/*" onChange={handleFile} className="hidden" />
-                {preview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={preview} alt="preview" className="max-h-40 mx-auto rounded-md object-contain" />
-                ) : (
-                  <>
-                    <i className="ti ti-upload text-2xl text-text-muted block mb-1" />
-                    <div className="text-[13px] text-text-muted">Tap untuk upload foto</div>
-                    <div className="text-[11px] text-text-muted">JPG, PNG — max 5MB</div>
-                  </>
-                )}
-              </label>
-              {preview && (
-                <button onClick={() => { setBuktiFile(null); setPreview(null) }}
-                  className="text-[12px] text-red mt-1">Hapus foto</button>
-              )}
+          {/* STEP 1: Kelas & Jadwal */}
+          {step === 1 && (
+            <div className="flex flex-col gap-3.5">
+              <div className="text-[14px] font-bold text-gray-800 flex items-center gap-2 pb-1 border-b border-gray-100">
+                🏫 Pilihan Kelas & Jadwal
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Pilihan Kelas</label>
+                <div className="flex flex-col gap-2">
+                  {KELAS_LIST.map((k) => (
+                    <button key={k.id} onClick={() => up('paket', k.label)}
+                      className={`text-left px-3.5 py-3 rounded-xl border-2 transition-all ${form.paket === k.label ? 'border-[#185FA5] bg-[#E6F4FB]' : 'border-gray-100 bg-gray-50'}`}>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <div className="text-[13px] font-semibold text-gray-800">{k.label}</div>
+                          <div className="text-[11px] text-gray-400">{k.desc}</div>
+                        </div>
+                        {form.paket === k.label && <i className="ti ti-check text-[#185FA5]" />}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Hari yang Diinginkan</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {HARI_LIST.map((h) => (
+                    <button key={h} onClick={() => up('jadwal_hari', h)}
+                      className={`py-2 rounded-xl border text-[12px] font-medium transition-all ${form.jadwal_hari === h ? 'bg-[#185FA5] text-white border-[#185FA5]' : 'border-gray-200 text-gray-600 bg-gray-50'}`}>
+                      {h}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Jam yang Diinginkan</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {JAM_LIST.map((j) => (
+                    <button key={j} onClick={() => up('jadwal_jam', j)}
+                      className={`py-2 rounded-xl border text-[12px] font-medium transition-all ${form.jadwal_jam === j ? 'bg-[#185FA5] text-white border-[#185FA5]' : 'border-gray-200 text-gray-600 bg-gray-50'}`}>
+                      {j}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Catatan (opsional)</label>
+                <textarea placeholder="Kondisi khusus, alergi, pertanyaan..." value={form.catatan}
+                  onChange={(e) => up('catatan', e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-gray-800 resize-none focus:outline-none focus:border-[#185FA5]" rows={2} />
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Nav buttons */}
-        <div className="flex gap-2 mt-6">
-          {step > 0 && (
-            <button onClick={() => setStep(step - 1)}
-              className="flex-1 border border-border text-text text-[14px] font-medium py-3 rounded-md hover:bg-bg-2 transition-all">
-              Kembali
-            </button>
+          {/* STEP 2: Pembayaran */}
+          {step === 2 && (
+            <div className="flex flex-col gap-3.5">
+              <div className="text-[14px] font-bold text-gray-800 flex items-center gap-2 pb-1 border-b border-gray-100">
+                💳 Pembayaran
+              </div>
+              {/* Ringkasan */}
+              <div className="bg-[#E6F4FB] rounded-xl p-3.5">
+                <div className="text-[11px] font-semibold text-[#185FA5] uppercase tracking-wide mb-2">Ringkasan</div>
+                <div className="space-y-1 text-[12px]">
+                  {[
+                    ['Nama', form.nama_murid],
+                    ['Kelas', form.paket],
+                    ['Kategori', form.kategori === 'abk' ? '⭐ ABK (+Rp 50.000)' : '🏊 Anak Normal'],
+                    ['Jadwal', `${form.jadwal_hari} · ${form.jadwal_jam}`],
+                  ].map(([k,v]) => (
+                    <div key={k} className="flex justify-between">
+                      <span className="text-gray-400">{k}</span>
+                      <strong className="text-gray-800 text-right max-w-[200px]">{v}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Rekening */}
+              <div>
+                <div className="text-[12px] font-semibold text-gray-700 mb-2">Silakan transfer ke:</div>
+                <div className="bg-white border border-gray-100 rounded-xl p-3.5 shadow-sm space-y-2">
+                  {[['Nama Rekening', REKENING.nama],['Bank', REKENING.bank]].map(([k,v]) => (
+                    <div key={k} className="flex justify-between text-[12px]">
+                      <span className="text-gray-400">{k}</span>
+                      <strong className="text-gray-800">{v}</strong>
+                    </div>
+                  ))}
+                  <div className="flex justify-between items-center text-[12px]">
+                    <span className="text-gray-400">No. Rekening</span>
+                    <div className="flex items-center gap-2">
+                      <strong className="font-mono text-[14px] text-gray-800">{REKENING.nomor}</strong>
+                      <button onClick={() => { navigator.clipboard.writeText(REKENING.nomor); showToast('Disalin ✓','success') }}
+                        className="text-[11px] bg-[#E6F4FB] text-[#185FA5] px-2 py-0.5 rounded-lg font-medium">Salin</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {/* Upload */}
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">
+                  Upload Bukti Transfer <span className="normal-case text-gray-300">(opsional)</span>
+                </label>
+                <label className={`block border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${preview ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-[#185FA5]'}`}>
+                  <input type="file" accept="image/*" onChange={handleFile} className="hidden" />
+                  {preview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={preview} alt="preview" className="max-h-36 mx-auto rounded-lg object-contain" />
+                  ) : (
+                    <>
+                      <i className="ti ti-upload text-xl text-gray-300 block mb-1" />
+                      <div className="text-[12px] text-gray-400">Tap untuk pilih foto</div>
+                    </>
+                  )}
+                </label>
+                {preview && <button onClick={() => {setBuktiFile(null);setPreview(null)}} className="text-[11px] text-red-400 mt-1">× Hapus</button>}
+              </div>
+              {/* Penutup */}
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center text-[12px] text-gray-500 leading-relaxed">
+                Setelah transfer, mohon kirim bukti pembayaran ya 🙏<br/>
+                <span className="text-[#185FA5] font-semibold">Terima kasih!</span> Kita siap bantu si kecil belajar renang dengan pendekatan yang aman, nyaman, dan menyenangkan 💦
+              </div>
+            </div>
           )}
-          {step < 2 ? (
-            <button onClick={() => stepValid() ? setStep(step + 1) : showToast('Lengkapi semua field')}
-              className={`flex-1 text-white text-[14px] font-semibold py-3 rounded-md transition-all ${stepValid() ? 'bg-[#185FA5] hover:bg-[#0C447C]' : 'bg-[#185FA5]/50'}`}>
-              Lanjut
-            </button>
-          ) : (
-            <button onClick={submit} disabled={saving}
-              className="flex-1 bg-[#185FA5] text-white text-[14px] font-semibold py-3 rounded-md hover:bg-[#0C447C] disabled:opacity-50 transition-all">
-              {saving ? 'Mengirim...' : '✓ Kirim Pendaftaran'}
-            </button>
-          )}
+
+          {/* Navigasi */}
+          <div className="flex gap-2 mt-5">
+            {step > 0 && (
+              <button onClick={() => setStep(step - 1)}
+                className="flex-1 border border-gray-200 text-gray-600 text-[13px] font-semibold py-3 rounded-xl hover:bg-gray-50 transition-all">
+                ← Kembali
+              </button>
+            )}
+            {step < 2 ? (
+              <button onClick={() => stepValid() ? setStep(step + 1) : showToast('Lengkapi semua field yang wajib diisi')}
+                className={`flex-1 text-white text-[13px] font-semibold py-3 rounded-xl transition-all ${stepValid() ? 'bg-[#185FA5] hover:bg-[#0C447C]' : 'bg-[#185FA5]/40'}`}>
+                Lanjut →
+              </button>
+            ) : (
+              <button onClick={submit} disabled={saving}
+                className="flex-1 bg-[#185FA5] text-white text-[13px] font-semibold py-3 rounded-xl hover:bg-[#0C447C] disabled:opacity-50 transition-all">
+                {saving ? 'Mengirim...' : '✓ Kirim Pendaftaran'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
       <ToastProvider />

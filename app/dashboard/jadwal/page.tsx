@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getSesi, addSesiBatch, updateSesi, deleteSesi, Sesi } from '@/lib/supabase'
+import { getSesi, getMurid, addSesiBatch, updateSesi, deleteSesi, Sesi, Murid } from '@/lib/supabase'
 import { fmtTgl, fmtShort, jamSelesai, KOLAM_PRESETS } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
@@ -8,6 +8,7 @@ import Modal from '@/components/ui/Modal'
 export default function JadwalPage() {
   const [sesiList, setSesiList] = useState<Sesi[]>([])
   const [loading, setLoading] = useState(true)
+  const [muridList, setMuridList] = useState<Murid[]>([])
   const [showAdd, setShowAdd] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -29,7 +30,7 @@ export default function JadwalPage() {
 
   const load = async () => {
     setLoading(true)
-    try { setSesiList(await getSesi(200)) }
+    try { const [sesi, murid] = await Promise.all([getSesi(200), getMurid()]); setSesiList(sesi); setMuridList(murid) }
     catch (e: any) { showToast('Gagal load: ' + (e?.message || ''), 'error'); console.error(e) }
     finally { setLoading(false) }
   }
@@ -123,36 +124,58 @@ export default function JadwalPage() {
         </div>
       )}
 
-      {sortedDates.map((tglKey) => (
-        <div key={tglKey} className="mb-4">
-          <div className="text-[12px] font-semibold text-text-muted uppercase tracking-wide mb-2 px-1">
-            {fmtTgl(tglKey)}
-          </div>
-          <div className="flex flex-col gap-2">
-            {grouped[tglKey].map((s) => (
-              <div key={s.id} className="bg-bg border border-border rounded-lg px-4 py-3 flex items-center gap-3 shadow-sm">
-                <div className="w-10 h-10 bg-blue-light rounded-md flex items-center justify-center flex-shrink-0">
-                  <i className="ti ti-clock text-blue text-lg" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-[14px] font-semibold text-text">
-                    {s.jam}:{s.menit} – {jamSelesai(s.jam, s.menit, s.durasi)}
+      {sortedDates.map((tglKey) => {
+        const hariSesi = new Date(tglKey + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long' })
+        const muridHariIni = muridList.filter((m) =>
+          m.jadwal_hari && m.jadwal_hari.toLowerCase() === hariSesi.toLowerCase()
+        )
+        return (
+          <div key={tglKey} className="mb-4">
+            <div className="text-[12px] font-semibold text-text-muted uppercase tracking-wide mb-2 px-1">
+              {fmtTgl(tglKey)}
+            </div>
+            <div className="flex flex-col gap-2">
+              {grouped[tglKey].map((s) => (
+                <div key={s.id} className="bg-bg border border-border rounded-lg px-4 py-3 flex items-center gap-3 shadow-sm">
+                  <div className="w-10 h-10 bg-blue-light rounded-md flex items-center justify-center flex-shrink-0">
+                    <i className="ti ti-clock text-blue text-lg" />
                   </div>
-                  <div className="text-[12px] text-text-muted">{s.kolam} · {s.durasi} menit</div>
+                  <div className="flex-1">
+                    <div className="text-[14px] font-semibold text-text">
+                      {s.jam}:{s.menit} – {jamSelesai(s.jam, s.menit, s.durasi)}
+                    </div>
+                    <div className="text-[12px] text-text-muted">{s.kolam} · {s.durasi} menit</div>
+                  </div>
+                  <button onClick={() => openEdit(s)}
+                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
+                    <i className="ti ti-edit text-base" />
+                  </button>
+                  <button onClick={() => handleDelete(s)}
+                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
+                    <i className="ti ti-trash text-base" />
+                  </button>
                 </div>
-                <button onClick={() => openEdit(s)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
-                  <i className="ti ti-edit text-base" />
-                </button>
-                <button onClick={() => handleDelete(s)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
-                  <i className="ti ti-trash text-base" />
-                </button>
+              ))}
+            </div>
+
+            {/* Murid yang sesuai jadwal hari ini */}
+            {muridHariIni.length > 0 && (
+              <div className="mt-2 bg-blue-light/50 border border-blue/10 rounded-lg px-3 py-2">
+                <div className="text-[11px] font-semibold text-blue mb-1.5">
+                  <i className="ti ti-users text-xs mr-1" />Murid terdaftar hari {hariSesi} ({muridHariIni.length})
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {muridHariIni.map((m) => (
+                    <span key={m.id} className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${m.kategori === 'abk' ? 'bg-yellow/10 text-yellow' : 'bg-blue-light text-blue'}`}>
+                      {m.nama}{m.jadwal_jam ? ` · ${m.jadwal_jam}` : ''}
+                    </span>
+                  ))}
+                </div>
               </div>
-            ))}
+            )}
           </div>
-        </div>
-      ))}
+        )
+      })}
 
       {!loading && !sortedDates.length && (
         <div className="text-center py-12 text-text-muted">

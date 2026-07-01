@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getSesiByTanggal, getMurid, getAbsensi, upsertAbsensiBatch, addSesi, Sesi, Murid, Absensi } from '@/lib/supabase'
+import { getSesiByTanggal, getMurid, getAbsensi, upsertAbsensiBatch, addSesi, getMuridSiapTagih, Sesi, Murid, Absensi } from '@/lib/supabase'
 import { fmtTgl, todayStr, KOLAM_PRESETS, jamSelesai } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
@@ -15,6 +15,7 @@ export default function HariIniPage() {
   const [showTambah, setShowTambah] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savingSesi, setSavingSesi] = useState<string | null>(null)
+  const [siapTagihList, setSiapTagihList] = useState<{murid: Murid; jumlahHadir: number; jumlahTarget: number}[]>([])
 
   const [jam, setJam] = useState('07')
   const [menit, setMenit] = useState('00')
@@ -65,6 +66,8 @@ export default function HariIniPage() {
       }))
       await upsertAbsensiBatch(records)
       showToast('Absensi disimpan ✓', 'success')
+      // Cek otomatis murid yang sudah siap tagih
+      getMuridSiapTagih().then(setSiapTagihList).catch(() => {})
     } catch (e: any) {
       showToast('Gagal simpan: ' + (e?.message || ''), 'error')
       console.error(e)
@@ -119,6 +122,32 @@ export default function HariIniPage() {
           <i className="ti ti-plus text-base" />Tambah Sesi
         </button>
       </div>
+
+      {/* Notifikasi otomatis — murid siap tagih */}
+      {siapTagihList.length > 0 && (
+        <div className="bg-green/5 border border-green/20 rounded-lg p-3 mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <i className="ti ti-bell text-green text-base" />
+            <span className="text-[13px] font-semibold text-green">
+              {siapTagihList.length} murid siap ditagih!
+            </span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {siapTagihList.map(({ murid, jumlahHadir, jumlahTarget }) => (
+              <div key={murid.id} className="flex items-center justify-between bg-white rounded-md px-3 py-2">
+                <div className="text-[12px] font-medium text-text">{murid.nama}</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-green font-semibold">{jumlahHadir}/{jumlahTarget}x hadir</span>
+                  <a href="/dashboard/kirim"
+                    className="text-[11px] bg-green text-white px-2 py-0.5 rounded-full hover:bg-green/80 transition-all">
+                    Tagih →
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="text-center py-12 text-text-muted text-sm">
