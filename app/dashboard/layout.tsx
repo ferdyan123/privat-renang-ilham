@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { getPendingCount } from '@/lib/supabase'
 import { ToastProvider } from '@/components/ui/Toast'
+import NotificationSetup from '@/components/ui/NotificationSetup'
 
 const NAV = [
   { tab: 'hari-ini',   href: '/dashboard',          icon: 'ti-calendar-check', label: 'Hari Ini' },
@@ -121,6 +122,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
 
       <ToastProvider />
+      <NotificationSetup />
     </div>
   )
 }

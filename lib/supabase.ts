@@ -16,6 +16,8 @@ export interface Murid {
   jadwal_hari: string | null
   jadwal_jam: string | null
   jadwal_kolam: string | null
+  harga: number
+  jumlah_sesi: number
   aktif: boolean
 }
 
@@ -163,6 +165,7 @@ export interface Tagihan {
   jumlah_hadir: number
   status: 'belum_bayar' | 'menunggu_konfirmasi' | 'lunas'
   bukti_tf_url: string | null
+  total_harga: number
   created_at: string
   paid_at: string | null
 }
@@ -206,13 +209,13 @@ export const updateTagihanStatus = async (id: string, status: string, bukti_tf_u
 }
 
 // Hitung siklus berjalan murid — kembalikan sesi hadir yang belum masuk tagihan lunas
-export const getSiklusBerjalan = async (muridId: string, paket: string): Promise<{
+export const getSiklusBerjalan = async (muridId: string, paket: string, jumlahSesiOverride?: number): Promise<{
   sesiHadir: string[]
   jumlahTarget: number
   siapTagih: boolean
   siklusBerikutnya: number
 }> => {
-  const jumlahTarget = paket.includes('8') ? 8 : 4
+  const jumlahTarget = jumlahSesiOverride ?? (paket.includes('8') ? 8 : 4)
 
   // Ambil semua tagihan lunas untuk tahu sesi mana yang sudah dibayar
   const { data: tagihanLunas } = await supabase

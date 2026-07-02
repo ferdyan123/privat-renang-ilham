@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { getSesiByTanggal, getMurid, getAbsensi, upsertAbsensiBatch, addSesi, getMuridSiapTagih, Sesi, Murid, Absensi } from '@/lib/supabase'
+import { sendLocalNotif } from '@/components/ui/NotificationSetup'
 import { fmtTgl, todayStr, KOLAM_PRESETS, jamSelesai } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
@@ -46,7 +47,11 @@ export default function HariIniPage() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    // Cek siap tagih saat halaman dibuka
+    getMuridSiapTagih().then(setSiapTagihList).catch(() => {})
+  }, [])
 
   // Set status langsung dari klik tombol spesifik (bukan toggle berputar)
   const setStatus = (sesiId: string, muridId: string, status: Absensi['status']) => {
@@ -67,7 +72,17 @@ export default function HariIniPage() {
       await upsertAbsensiBatch(records)
       showToast('Absensi disimpan ✓', 'success')
       // Cek otomatis murid yang sudah siap tagih
-      getMuridSiapTagih().then(setSiapTagihList).catch(() => {})
+      getMuridSiapTagih().then((list) => {
+        setSiapTagihList(list)
+        if (list.length > 0) {
+          const names = list.map(x => x.murid.nama).join(', ')
+          sendLocalNotif(
+            `${list.length} murid siap ditagih! 💰`,
+            `${names} sudah hadir ${list[0].jumlahHadir}x — waktunya generate tagihan.`,
+            '/dashboard/kirim'
+          )
+        }
+      }).catch(() => {})
     } catch (e: any) {
       showToast('Gagal simpan: ' + (e?.message || ''), 'error')
       console.error(e)

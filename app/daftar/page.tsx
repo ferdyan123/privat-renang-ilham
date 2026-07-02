@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { HARGA_BASE, hitungHarga, fmtRupiah } from '@/lib/utils'
 import { ToastProvider, showToast } from '@/components/ui/Toast'
 
 const REKENING = {
@@ -43,15 +44,20 @@ export default function DaftarPublikPage() {
 
   const [form, setForm] = useState({
     nama_murid: '', usia: '', jenis_kelamin: '', kategori: '',
-    paket: '', jadwal_hari: '', jadwal_jam: '', catatan: '',
+    paket: '', jumlah_sesi: '4', jadwal_hari: '', jadwal_jam: '', catatan: '',
     nama_ortu: '', wa_ortu: '',
   })
 
   const up = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
+  // Hitung harga berdasarkan pilihan
+  const hargaSekarang = form.paket && form.kategori
+    ? hitungHarga(form.paket, form.kategori, parseInt(form.jumlah_sesi))
+    : 0
+
   const stepValid = () => {
     if (step === 0) return form.nama_murid.trim() && form.usia && form.jenis_kelamin && form.kategori && form.nama_ortu.trim() && form.wa_ortu.trim()
-    if (step === 1) return form.paket && form.jadwal_hari && form.jadwal_jam
+    if (step === 1) return form.paket && form.jumlah_sesi && form.jadwal_hari && form.jadwal_jam
     return true
   }
 
@@ -80,11 +86,13 @@ export default function DaftarPublikPage() {
         usia: parseInt(form.usia),
         nama_ortu: form.nama_ortu,
         wa_ortu: form.wa_ortu,
-        paket: form.paket + (form.kategori === 'abk' ? ' +ABK' : ''),
+        paket: form.paket + (form.kategori === 'abk' ? ' +ABK' : '') + ' ' + form.jumlah_sesi + 'x',
         jadwal_hari: form.jadwal_hari,
         jadwal_jam: form.jadwal_jam,
         bukti_tf_url,
-        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori}${form.catatan ? ' | ' + form.catatan : ''}`,
+        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Sesi: ${form.jumlah_sesi}x | Harga: ${fmtRupiah(hargaSekarang)}${form.catatan ? ' | ' + form.catatan : ''}`,
+        jumlah_sesi: parseInt(form.jumlah_sesi),
+        harga: hargaSekarang,
         status: 'menunggu',
       })
       if (error) throw error
@@ -110,7 +118,7 @@ export default function DaftarPublikPage() {
         </div>
         <div className="bg-[#E6F4FB] rounded-xl p-4 text-left text-[13px] text-gray-600 mb-4 space-y-1">
           <div className="font-semibold text-[#185FA5] mb-1.5">Ringkasan Pendaftaran</div>
-          <div>Kelas: <strong>{form.paket}</strong></div>
+          <div>Kelas: <strong>{form.paket} ({form.jumlah_sesi}x/bulan)</strong></div>
           <div>Jadwal: <strong>{form.jadwal_hari} · {form.jadwal_jam}</strong></div>
           <div>Kategori: <strong>{form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'}</strong></div>
         </div>
@@ -282,6 +290,27 @@ export default function DaftarPublikPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Jumlah sesi */}
+              {form.paket && (
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Jumlah Sesi per Bulan</label>
+                  <div className="flex gap-2">
+                    {['4', '8'].map((n) => (
+                      <button key={n} onClick={() => up('jumlah_sesi', n)}
+                        className={`flex-1 py-2.5 rounded-xl border-2 text-[13px] font-medium transition-all ${form.jumlah_sesi === n ? 'border-[#185FA5] bg-[#E6F4FB] text-[#185FA5]' : 'border-gray-100 bg-gray-50 text-gray-600'}`}>
+                        <div className="font-bold">{n}x / bulan</div>
+                        {form.kategori && form.paket && (
+                          <div className="text-[11px] mt-0.5 opacity-70">
+                            {fmtRupiah(hitungHarga(form.paket, form.kategori, parseInt(n)))}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Hari yang Diinginkan</label>
                 <div className="grid grid-cols-3 gap-1.5">
@@ -326,8 +355,10 @@ export default function DaftarPublikPage() {
                   {[
                     ['Nama', form.nama_murid],
                     ['Kelas', form.paket],
-                    ['Kategori', form.kategori === 'abk' ? '⭐ ABK (+Rp 50.000)' : '🏊 Anak Normal'],
+                    ['Sesi', form.jumlah_sesi + 'x/bulan'],
+                    ['Kategori', form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'],
                     ['Jadwal', `${form.jadwal_hari} · ${form.jadwal_jam}`],
+                    ['Total Biaya', hargaSekarang > 0 ? fmtRupiah(hargaSekarang) : '-'],
                   ].map(([k,v]) => (
                     <div key={k} className="flex justify-between">
                       <span className="text-gray-400">{k}</span>

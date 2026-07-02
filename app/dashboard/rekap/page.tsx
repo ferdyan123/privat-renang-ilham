@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import { usePathname } from 'next/navigation'
 import { getMurid, getSesi, getAbsensi, Murid, Sesi } from '@/lib/supabase'
 import { fmtBulan, bulanStr } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
@@ -19,18 +20,20 @@ export default function RekapPage() {
   const [stats, setStats] = useState<MuridStat[]>([])
   const [loading, setLoading] = useState(false)
   const [bulanList, setBulanList] = useState<string[]>([])
+  const pathname = usePathname()
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const sesiAll = await getSesi(200)
-        const months = [...new Set(sesiAll.map((s) => s.tanggal.slice(0, 7)))].sort().reverse()
-        setBulanList(months)
-        if (months[0]) setBulan(months[0])
-      } catch { showToast('Gagal load data', 'error') }
-    }
-    load()
+  const initBulan = useCallback(async () => {
+    try {
+      const sesiAll = await getSesi(200)
+      const months = [...new Set(sesiAll.map((s) => s.tanggal.slice(0, 7)))].sort().reverse()
+      setBulanList(months)
+      if (months[0] && !bulan) setBulan(months[0])
+    } catch { showToast('Gagal load data', 'error') }
   }, [])
+
+  useEffect(() => { initBulan() }, [])
+  // Re-fetch saat tab aktif (pathname berubah ke rekap)
+  useEffect(() => { if (pathname?.includes('rekap')) initBulan() }, [pathname])
 
   useEffect(() => {
     if (!bulan) return

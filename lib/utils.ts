@@ -26,16 +26,26 @@ export const jamSelesai = (jam: string, menit: string, durasi: number) => {
 export const todayStr = () => new Date().toISOString().split('T')[0]
 export const bulanStr = () => new Date().toISOString().slice(0, 7)
 
-// Hanya 2 paket: 4x dan 8x per bulan
+// Paket di dashboard admin
 export const PAKET_LIST = [
-  'Private (4x/bulan)',
-  'Private (8x/bulan)',
+  'Semi Privat',
+  'Eksklusif',
 ]
 
-export const PAKET_HARGA: Record<string, number> = {
-  'Private (4x/bulan)': 250000,
-  'Private (8x/bulan)': 450000,
+// Harga berdasarkan paket + kategori + jumlah sesi
+// Base harga untuk 4x/bulan
+export const HARGA_BASE: Record<string, Record<string, number>> = {
+  'Semi Privat': { normal: 500000, abk: 600000 },
+  'Eksklusif':   { normal: 1000000, abk: 1200000 },
 }
+
+export const hitungHarga = (paket: string, kategori: string, jumlahSesi: number): number => {
+  const base = HARGA_BASE[paket]?.[kategori === 'abk' ? 'abk' : 'normal'] ?? 0
+  return base * (jumlahSesi === 8 ? 2 : 1)
+}
+
+export const fmtRupiah = (nominal: number): string =>
+  'Rp ' + nominal.toLocaleString('id-ID')
 
 // Kolam preset — form bisa ketik custom
 export const KOLAM_PRESETS = ['Kolam A', 'Kolam B', 'Kolam VIP']

@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { getMurid, getSesi, createTagihan, getSiklusBerjalan, Murid, Sesi } from '@/lib/supabase'
-import { fmtShort } from '@/lib/utils'
+import { fmtShort, fmtRupiah } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Avatar from '@/components/ui/Avatar'
 
@@ -64,6 +64,7 @@ export default function KirimPage() {
         jumlah_hadir: sesiUntukTagihan.length,
         status: 'belum_bayar',
         bukti_tf_url: null,
+        total_harga: murid.harga ?? 0,
       })
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
       setGeneratedLink(`${appUrl}/kartu?tagihan=${tagihan.id}`)
@@ -83,6 +84,7 @@ export default function KirimPage() {
 
   const kirimWA = () => {
     if (!generatedLink || !murid || !siklus) return
+    const harga = murid.harga ?? 0
     const msg =
 `*Tagihan Les Renang - SwimTrack* 🏊
 
@@ -91,9 +93,10 @@ Halo orang tua dari *${murid.nama}* 👋
 Berikut detail tagihan siklus #${siklus.siklusBerikutnya}:
 
 👤 *Nama:* ${murid.nama}
-📦 *Paket:* ${murid.paket}
+📦 *Paket:* ${murid.paket} (${murid.jumlah_sesi ?? 4}x/bulan)
 📅 *Jadwal:* ${jadwalLabel}
 ✅ *Kehadiran:* ${siklus.jumlahTarget}x hadir
+💰 *Total tagihan:* ${harga > 0 ? fmtRupiah(harga) : 'sesuai paket'}
 
 💳 *Pembayaran:*
 Silakan transfer ke:
@@ -218,8 +221,11 @@ _Terima kasih! 💙_`
           {/* Info murid ringkas */}
           <div className="bg-bg-2 rounded-md px-3 py-2 mb-3 text-[12px] flex flex-wrap gap-x-4 gap-y-1">
             <div><span className="text-text-muted">Nama: </span><strong className="text-text">{murid.nama}</strong></div>
-            <div><span className="text-text-muted">Paket: </span><strong className="text-text">{murid.paket}</strong></div>
+            <div><span className="text-text-muted">Paket: </span><strong className="text-text">{murid.paket} ({murid.jumlah_sesi ?? 4}x)</strong></div>
             <div><span className="text-text-muted">Jadwal: </span><strong className="text-text">{jadwalLabel}</strong></div>
+            {(murid.harga ?? 0) > 0 && (
+              <div><span className="text-text-muted">Tagihan: </span><strong className="text-blue">{fmtRupiah(murid.harga ?? 0)}</strong></div>
+            )}
           </div>
 
           {/* Progress */}
