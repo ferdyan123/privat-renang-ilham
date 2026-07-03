@@ -332,3 +332,47 @@ export const getMuridSiapTagih = async (): Promise<{
   }
   return results
 }
+
+// ── Jadwal Slot ────────────────────────────────────────────────────────────
+
+export interface JadwalSlot {
+  id: string
+  kolam: string
+  hari: string
+  jam_mulai: string
+  jam_selesai: string
+  status: 'tersedia' | 'penuh'
+  urutan: number
+}
+
+export const getJadwalSlot = async (): Promise<JadwalSlot[]> => {
+  const { data, error } = await supabase
+    .from('jadwal_slot')
+    .select('*')
+    .order('urutan', { ascending: true })
+  if (error) throw error
+  return data
+}
+
+export const updateJadwalSlotStatus = async (id: string, status: 'tersedia' | 'penuh') => {
+  const { error } = await supabase
+    .from('jadwal_slot')
+    .update({ status })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export const addJadwalSlot = async (payload: Omit<JadwalSlot, 'id'>): Promise<JadwalSlot> => {
+  const { data, error } = await supabase
+    .from('jadwal_slot')
+    .insert(payload)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export const deleteJadwalSlot = async (id: string) => {
+  const { error } = await supabase.from('jadwal_slot').delete().eq('id', id)
+  if (error) throw error
+}

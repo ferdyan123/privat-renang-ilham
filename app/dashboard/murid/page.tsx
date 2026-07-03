@@ -255,16 +255,23 @@ export default function MuridPage() {
             </div>
           </div>
 
-          {/* Harga otomatis */}
-          <div className="bg-blue-light border border-blue/20 rounded-md px-3 py-2.5 flex items-center justify-between">
-            <div>
-              <div className="text-[11px] text-text-muted">Harga/bulan (otomatis)</div>
-              <div className="text-[18px] font-bold text-blue">{fmtRupiah(form.harga)}</div>
+          {/* Harga — otomatis tapi bisa di-edit manual */}
+          <div className="bg-blue-light border border-blue/20 rounded-md px-3 py-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-[11px] text-text-muted">Harga/bulan</div>
+              <div className="text-[10px] text-blue/60">{form.paket} · {form.jumlah_sesi}x · {form.kategori === 'abk' ? 'ABK' : 'Normal'}</div>
             </div>
-            <div className="text-[11px] text-text-muted text-right">
-              <div>{form.paket} · {form.jumlah_sesi}x</div>
-              <div>{form.kategori === 'abk' ? 'ABK' : 'Normal'}</div>
+            <div className="flex items-center gap-2">
+              <span className="text-[14px] font-semibold text-blue flex-shrink-0">Rp</span>
+              <input
+                type="number"
+                value={form.harga}
+                onChange={(e) => setForm(prev => ({ ...prev, harga: parseInt(e.target.value) || 0 }))}
+                className="flex-1 bg-white border border-blue/20 rounded-md px-3 py-1.5 text-[16px] font-bold text-blue focus:outline-none focus:border-blue"
+                placeholder="0"
+              />
             </div>
+            <div className="text-[10px] text-blue/50 mt-1">Harga otomatis dari paket. Bisa diubah manual jika ada harga khusus.</div>
           </div>
 
           {/* Jadwal tetap */}

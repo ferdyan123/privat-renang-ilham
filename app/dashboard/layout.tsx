@@ -13,6 +13,7 @@ const NAV = [
   { tab: 'grafik',     href: '/dashboard/grafik',    icon: 'ti-chart-line',     label: 'Grafik' },
   { tab: 'kirim',      href: '/dashboard/kirim',     icon: 'ti-send',           label: 'Kirim' },
   { tab: 'daftar',     href: '/dashboard/daftar',    icon: 'ti-user-plus',      label: 'Daftar', badge: true },
+  { tab: 'slot',       href: '/dashboard/slot',     icon: 'ti-calendar-event',  label: 'Slot' },
 ]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

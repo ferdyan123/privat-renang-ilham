@@ -1,6 +1,6 @@
 'use client'
-import { useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useState, useEffect } from 'react'
+import { supabase, getJadwalSlot, JadwalSlot } from '@/lib/supabase'
 import { HARGA_BASE, hitungHarga, fmtRupiah } from '@/lib/utils'
 import { ToastProvider, showToast } from '@/components/ui/Toast'
 
@@ -15,8 +15,7 @@ const KELAS_LIST = [
   { id: 'eksklusif', label: 'Eksklusif', desc: 'Sesi khusus 1-on-1 dengan instruktur' },
 ]
 
-const HARI_LIST = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
-const JAM_LIST = ['07:00', '08:00', '09:00', '10:00', '15:00', '16:00', '17:00']
+// Hari & jam diambil dari jadwal_slot Supabase
 const STEP_LABELS = ['Biodata', 'Kelas & Jadwal', 'Pembayaran']
 
 // Tata letak ilustrasi — abstrak, tengah maju mendekati form
@@ -39,6 +38,7 @@ export default function DaftarPublikPage() {
   const [step, setStep] = useState(0)
   const [done, setDone] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [jadwalSlots, setJadwalSlots] = useState<JadwalSlot[]>([])
   const [buktiFile, setBuktiFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
 
@@ -49,6 +49,10 @@ export default function DaftarPublikPage() {
   })
 
   const up = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
+
+  useEffect(() => {
+    getJadwalSlot().then(setJadwalSlots).catch(() => {})
+  }, [])
 
   // Hitung harga berdasarkan pilihan
   const hargaSekarang = form.paket && form.kategori
@@ -312,26 +316,66 @@ export default function DaftarPublikPage() {
               )}
 
               <div>
-                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Hari yang Diinginkan</label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {HARI_LIST.map((h) => (
-                    <button key={h} onClick={() => up('jadwal_hari', h)}
-                      className={`py-2 rounded-xl border text-[12px] font-medium transition-all ${form.jadwal_hari === h ? 'bg-[#185FA5] text-white border-[#185FA5]' : 'border-gray-200 text-gray-600 bg-gray-50'}`}>
-                      {h}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Jam yang Diinginkan</label>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {JAM_LIST.map((j) => (
-                    <button key={j} onClick={() => up('jadwal_jam', j)}
-                      className={`py-2 rounded-xl border text-[12px] font-medium transition-all ${form.jadwal_jam === j ? 'bg-[#185FA5] text-white border-[#185FA5]' : 'border-gray-200 text-gray-600 bg-gray-50'}`}>
-                      {j}
-                    </button>
-                  ))}
-                </div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">
+                  Hari & Jam yang Diinginkan
+                </label>
+                {/* Group by kolam */}
+                {(() => {
+                  const grouped = jadwalSlots.reduce<Record<string, JadwalSlot[]>>((acc, s) => {
+                    acc[s.kolam] = acc[s.kolam] ? [...acc[s.kolam], s] : [s]
+                    return acc
+                  }, {})
+                  return Object.entries(grouped).map(([kolam, slots]) => (
+                    <div key={kolam} className="mb-3">
+                      <div className="text-[11px] font-bold text-gray-500 mb-1.5 flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#185FA5]" />{kolam}
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {slots.map(s => {
+                          const isSelected = form.jadwal_hari === s.hari && form.jadwal_jam === s.jam_mulai && form.catatan?.includes(s.kolam)
+                          const isPenuh = s.status === 'penuh'
+                          return (
+                            <button key={s.id}
+                              disabled={isPenuh}
+                              onClick={() => {
+                                if (isPenuh) return
+                                up('jadwal_hari', s.hari)
+                                up('jadwal_jam', s.jam_mulai)
+                                // Simpan kolam di catatan sementara
+                                setForm(f => ({ ...f, jadwal_hari: s.hari, jadwal_jam: s.jam_mulai, catatan: (f.catatan || '').replace(/Kolam:[^|]*/,'') + `Kolam: ${s.kolam} ` }))
+                              }}
+                              className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border-2 text-left transition-all ${
+                                isPenuh
+                                  ? 'border-gray-100 bg-gray-50 opacity-50 cursor-not-allowed'
+                                  : isSelected
+                                    ? 'border-[#185FA5] bg-[#E6F4FB]'
+                                    : 'border-gray-100 bg-gray-50 hover:border-[#185FA5]/40'
+                              }`}>
+                              <div>
+                                <div className="text-[12px] font-semibold text-gray-800">{s.hari}</div>
+                                <div className="text-[11px] text-gray-400">{s.jam_mulai} – {s.jam_selesai}</div>
+                              </div>
+                              {isPenuh ? (
+                                <span className="text-[10px] font-bold text-red-400 bg-red-50 px-2 py-0.5 rounded-full border border-red-100">
+                                  Kelas Penuh
+                                </span>
+                              ) : isSelected ? (
+                                <i className="ti ti-check text-[#185FA5] text-base" />
+                              ) : (
+                                <span className="text-[10px] text-green-500 font-semibold">Tersedia</span>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))
+                })()}
+                {jadwalSlots.length === 0 && (
+                  <div className="text-center py-4 text-gray-400 text-[12px]">
+                    Jadwal belum tersedia. Hubungi admin.
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Catatan (opsional)</label>
