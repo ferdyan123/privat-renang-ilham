@@ -1,61 +1,41 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getJadwalSlot, updateJadwalSlotStatus, addJadwalSlot, deleteJadwalSlot, JadwalSlot } from '@/lib/supabase'
+import { getSlotDariJadwal, upsertSlotStatus, SlotInfo } from '@/lib/supabase'
 import { showToast } from '@/components/ui/Toast'
-import Modal from '@/components/ui/Modal'
-
-const KOLAM_LIST = ['Kolam Asa', 'Kolam BBS', 'Kolam KCC']
-const HARI_LIST = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
-const JAM_LIST = ['07:00','08:00','09:00','10:00','10:30','11:00','13:30','15:00','16:00','17:00']
 
 export default function SlotPage() {
-  const [slots, setSlots] = useState<JadwalSlot[]>([])
+  const [slots, setSlots] = useState<SlotInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [showAdd, setShowAdd] = useState(false)
-  const [saving, setSaving] = useState(false)
   const [generatedLink, setGeneratedLink] = useState('')
-  const [form, setForm] = useState({
-    kolam: KOLAM_LIST[0], hari: '', jam_mulai: '', jam_selesai: '', urutan: 99
-  })
+  const [toggling, setToggling] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
-    try { setSlots(await getJadwalSlot()) }
+    try { setSlots(await getSlotDariJadwal()) }
     catch (e: any) { showToast('Gagal load slot: ' + e?.message, 'error') }
     finally { setLoading(false) }
   }
 
   useEffect(() => { load() }, [])
 
-  const toggleStatus = async (slot: JadwalSlot) => {
+  const toggleStatus = async (slot: SlotInfo) => {
+    const key = `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
+    setToggling(key)
     const next = slot.status === 'tersedia' ? 'penuh' : 'tersedia'
     try {
-      await updateJadwalSlotStatus(slot.id, next)
-      setSlots(prev => prev.map(s => s.id === slot.id ? { ...s, status: next } : s))
-      showToast(next === 'penuh' ? `${slot.hari} ${slot.jam_mulai} → Penuh` : `${slot.hari} ${slot.jam_mulai} → Tersedia`, 'success')
+      await upsertSlotStatus(slot.hari, slot.jam_mulai, slot.kolam, next)
+      setSlots(prev => prev.map(s =>
+        s.hari === slot.hari && s.jam_mulai === slot.jam_mulai && s.kolam === slot.kolam
+          ? { ...s, status: next } : s
+      ))
+      showToast(
+        next === 'penuh'
+          ? `${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Penuh`
+          : `${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Tersedia`,
+        'success'
+      )
     } catch (e: any) { showToast('Gagal update: ' + e?.message, 'error') }
-  }
-
-  const handleAdd = async () => {
-    if (!form.hari || !form.jam_mulai || !form.jam_selesai) { showToast('Lengkapi semua field'); return }
-    setSaving(true)
-    try {
-      await addJadwalSlot({ ...form, status: 'tersedia' })
-      showToast('Slot ditambahkan ✓', 'success')
-      setShowAdd(false)
-      setForm({ kolam: KOLAM_LIST[0], hari: '', jam_mulai: '', jam_selesai: '', urutan: 99 })
-      load()
-    } catch (e: any) { showToast('Gagal: ' + e?.message, 'error') }
-    finally { setSaving(false) }
-  }
-
-  const handleDelete = async (slot: JadwalSlot) => {
-    if (!confirm(`Hapus slot ${slot.hari} ${slot.jam_mulai}?`)) return
-    try {
-      await deleteJadwalSlot(slot.id)
-      showToast('Slot dihapus')
-      load()
-    } catch (e: any) { showToast('Gagal hapus: ' + e?.message, 'error') }
+    finally { setToggling(null) }
   }
 
   const generateLink = () => {
@@ -71,7 +51,7 @@ export default function SlotPage() {
   }
 
   // Group by kolam
-  const grouped = slots.reduce<Record<string, JadwalSlot[]>>((acc, s) => {
+  const grouped = slots.reduce<Record<string, SlotInfo[]>>((acc, s) => {
     acc[s.kolam] = acc[s.kolam] ? [...acc[s.kolam], s] : [s]
     return acc
   }, {})
@@ -82,10 +62,21 @@ export default function SlotPage() {
   return (
     <div className="max-w-[720px] mx-auto">
 
+      {/* Info cara kerja */}
+      <div className="bg-blue-light border border-blue/20 rounded-lg px-4 py-3 mb-4 text-[12px] text-blue">
+        <div className="font-semibold mb-1 flex items-center gap-1.5">
+          <i className="ti ti-info-circle text-sm" />Cara kerja Tab Slot
+        </div>
+        <div className="text-blue/70 leading-relaxed">
+          Slot jadwal diambil otomatis dari data sesi di tab <strong>Jadwal</strong> — deduplikasi berdasarkan hari + jam + kolam yang sama.
+          Klik tombol untuk toggle <strong>Tersedia ↔ Penuh</strong>. Jadwal penuh tetap muncul di form pendaftaran tapi tidak bisa dipilih orang tua.
+        </div>
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="bg-blue-light border border-blue/20 rounded-md px-3 py-2 text-center">
-          <div className="text-[18px] font-bold text-blue">{slots.length}</div>
+        <div className="bg-bg border border-border rounded-md px-3 py-2 text-center">
+          <div className="text-[18px] font-bold text-text">{slots.length}</div>
           <div className="text-[11px] text-text-muted">Total slot</div>
         </div>
         <div className="bg-green/10 border border-green/20 rounded-md px-3 py-2 text-center">
@@ -98,85 +89,94 @@ export default function SlotPage() {
         </div>
       </div>
 
-      {/* Info */}
-      <div className="bg-yellow/10 border border-yellow/20 rounded-lg px-4 py-3 mb-4 text-[12px] text-text-muted">
-        <i className="ti ti-info-circle text-yellow mr-1.5" />
-        Klik tombol status untuk toggle <strong>Tersedia ↔ Penuh</strong>. Jadwal yang penuh akan tetap tampil di form pendaftaran tapi tidak bisa dipilih orang tua.
-      </div>
-
-      {/* Jadwal per kolam */}
-      {loading ? (
+      {loading && (
         <div className="text-center py-12 text-text-muted text-sm">
-          <i className="ti ti-loader-2 text-3xl block mb-2 animate-spin" />Memuat...
+          <i className="ti ti-loader-2 text-3xl block mb-2 animate-spin" />Memuat dari data jadwal...
         </div>
-      ) : (
-        Object.entries(grouped).map(([kolam, kolamSlots]) => (
-          <div key={kolam} className="mb-5">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-2 h-2 rounded-full bg-blue flex-shrink-0" />
-              <div className="text-[13px] font-bold text-text">{kolam}</div>
-              <div className="text-[11px] text-text-muted">
-                ({kolamSlots.filter(s=>s.status==='tersedia').length} tersedia · {kolamSlots.filter(s=>s.status==='penuh').length} penuh)
-              </div>
+      )}
+
+      {!loading && slots.length === 0 && (
+        <div className="text-center py-12 text-text-muted">
+          <i className="ti ti-calendar-off text-4xl block mb-2 opacity-40" />
+          <p className="text-sm font-medium">Belum ada slot jadwal</p>
+          <p className="text-[12px] mt-1">Tambahkan sesi di tab <strong>Jadwal</strong> dulu, nanti akan muncul otomatis di sini.</p>
+        </div>
+      )}
+
+      {/* Slot per kolam */}
+      {Object.entries(grouped).map(([kolam, kolamSlots]) => (
+        <div key={kolam} className="mb-5">
+          <div className="flex items-center gap-2 mb-2.5">
+            <div className="w-2 h-2 rounded-full bg-blue flex-shrink-0" />
+            <div className="text-[13px] font-bold text-text">{kolam}</div>
+            <div className="text-[11px] text-text-muted ml-1">
+              {kolamSlots.filter(s=>s.status==='tersedia').length} tersedia ·{' '}
+              {kolamSlots.filter(s=>s.status==='penuh').length} penuh
             </div>
-            <div className="flex flex-col gap-2">
-              {kolamSlots.map((slot) => (
-                <div key={slot.id} className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-all shadow-sm ${
-                  slot.status === 'penuh'
-                    ? 'bg-red/5 border-red/20'
-                    : 'bg-bg border-border'
+          </div>
+          <div className="flex flex-col gap-2">
+            {kolamSlots.map((slot) => {
+              const key = `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
+              const isToggling = toggling === key
+              return (
+                <div key={key} className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-all shadow-sm ${
+                  slot.status === 'penuh' ? 'bg-red/5 border-red/20' : 'bg-bg border-border'
                 }`}>
                   <div className="flex-1">
                     <div className="text-[13px] font-semibold text-text">{slot.hari}</div>
                     <div className="text-[12px] text-text-muted">{slot.jam_mulai} – {slot.jam_selesai}</div>
                   </div>
-                  {/* Toggle status */}
                   <button
                     onClick={() => toggleStatus(slot)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all ${
+                    disabled={isToggling}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all disabled:opacity-50 ${
                       slot.status === 'tersedia'
                         ? 'bg-green/10 border-green/30 text-green hover:bg-green hover:text-white'
                         : 'bg-red/10 border-red/30 text-red hover:bg-red hover:text-white'
                     }`}
                   >
-                    <i className={`ti ${slot.status === 'tersedia' ? 'ti-circle-check' : 'ti-circle-x'} text-sm`} />
+                    {isToggling ? (
+                      <i className="ti ti-loader-2 animate-spin text-sm" />
+                    ) : (
+                      <i className={`ti ${slot.status === 'tersedia' ? 'ti-circle-check' : 'ti-circle-x'} text-sm`} />
+                    )}
                     {slot.status === 'tersedia' ? 'Tersedia' : 'Penuh'}
                   </button>
-                  <button onClick={() => handleDelete(slot)}
-                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
-                    <i className="ti ti-trash text-sm" />
-                  </button>
                 </div>
-              ))}
-            </div>
+              )
+            })}
           </div>
-        ))
+        </div>
+      ))}
+
+      {/* Refresh button */}
+      {!loading && slots.length > 0 && (
+        <button onClick={load}
+          className="flex items-center gap-1.5 text-[12px] text-text-muted hover:text-text mb-6 mx-auto">
+          <i className="ti ti-refresh text-sm" />Refresh dari data jadwal
+        </button>
       )}
 
-      {/* Tombol tambah slot */}
-      <button onClick={() => setShowAdd(true)}
-        className="w-full border-2 border-dashed border-border text-text-muted text-[13px] py-3 rounded-lg hover:border-blue hover:text-blue transition-all mb-6 flex items-center justify-center gap-2">
-        <i className="ti ti-plus text-base" />Tambah Slot Jadwal
-      </button>
-
-      {/* Generate link section */}
+      {/* Generate link */}
       <div className="bg-bg border border-border rounded-lg p-4 shadow-sm">
         <div className="text-[14px] font-semibold text-text mb-1">Generate Link Pendaftaran</div>
         <div className="text-[12px] text-text-muted mb-4">
-          Link ini akan menampilkan semua jadwal di atas. Jadwal yang berstatus <strong className="text-red">Penuh</strong> tidak bisa dipilih orang tua.
+          Link menampilkan semua slot di atas. Yang <strong className="text-red">Penuh</strong> tidak bisa dipilih.
         </div>
 
-        {/* Preview jadwal di link */}
-        <div className="bg-bg-2 rounded-md p-3 mb-4 text-[12px]">
-          <div className="font-semibold text-text-muted mb-2 uppercase tracking-wide text-[10px]">Preview yang akan muncul di form</div>
+        {/* Mini preview */}
+        <div className="bg-bg-2 rounded-md p-3 mb-4">
+          <div className="text-[10px] font-semibold text-text-muted uppercase tracking-wide mb-2">Preview di form pendaftaran</div>
           <div className="flex flex-col gap-1">
             {slots.map(s => (
-              <div key={s.id} className={`flex items-center gap-2 py-1 ${s.status === 'penuh' ? 'opacity-40' : ''}`}>
-                <i className={`ti ${s.status === 'tersedia' ? 'ti-circle-check text-green' : 'ti-circle-x text-red'} text-sm`} />
+              <div key={`${s.hari}${s.jam_mulai}${s.kolam}`}
+                className={`flex items-center gap-2 text-[12px] py-0.5 ${s.status === 'penuh' ? 'opacity-40' : ''}`}>
+                <i className={`ti ${s.status === 'tersedia' ? 'ti-circle-check text-green' : 'ti-circle-x text-red'} text-sm flex-shrink-0`} />
                 <span className="text-text">{s.kolam} · {s.hari} {s.jam_mulai}–{s.jam_selesai}</span>
-                {s.status === 'penuh' && <span className="text-red text-[10px] font-semibold">(Penuh)</span>}
+                {s.status === 'penuh' && <span className="text-[10px] text-red font-semibold ml-auto">Penuh</span>}
               </div>
             ))}
+            {slots.length === 0 && <div className="text-[12px] text-text-muted">Belum ada slot</div>}
           </div>
         </div>
 
@@ -206,56 +206,6 @@ export default function SlotPage() {
           </div>
         )}
       </div>
-
-      {/* Modal tambah slot */}
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Tambah Slot Jadwal">
-        <div className="flex flex-col gap-3">
-          <div>
-            <label className="text-[12px] text-text-muted block mb-1.5">Kolam</label>
-            <div className="flex gap-2 flex-wrap">
-              {KOLAM_LIST.map(k => (
-                <button key={k} onClick={() => setForm({...form, kolam: k})}
-                  className={`px-3 py-1.5 rounded-full border text-[12px] font-medium transition-all ${form.kolam === k ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
-                  {k}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="text-[12px] text-text-muted block mb-1.5">Hari</label>
-            <div className="grid grid-cols-4 gap-1.5">
-              {HARI_LIST.map(h => (
-                <button key={h} onClick={() => setForm({...form, hari: h})}
-                  className={`py-1.5 rounded-md border text-[12px] font-medium transition-all ${form.hari === h ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
-                  {h.slice(0,3)}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[12px] text-text-muted block mb-1.5">Jam mulai</label>
-              <select value={form.jam_mulai} onChange={e => setForm({...form, jam_mulai: e.target.value})}
-                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text">
-                <option value="">Pilih jam</option>
-                {JAM_LIST.map(j => <option key={j} value={j}>{j}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-[12px] text-text-muted block mb-1.5">Jam selesai</label>
-              <select value={form.jam_selesai} onChange={e => setForm({...form, jam_selesai: e.target.value})}
-                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text">
-                <option value="">Pilih jam</option>
-                {JAM_LIST.map(j => <option key={j} value={j}>{j}</option>)}
-              </select>
-            </div>
-          </div>
-          <button onClick={handleAdd} disabled={saving}
-            className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-sm font-semibold hover:bg-[#0C447C] disabled:opacity-50 transition-all">
-            {saving ? 'Menyimpan...' : 'Tambah Slot'}
-          </button>
-        </div>
-      </Modal>
     </div>
   )
 }

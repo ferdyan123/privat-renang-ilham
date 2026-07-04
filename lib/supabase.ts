@@ -333,46 +333,78 @@ export const getMuridSiapTagih = async (): Promise<{
   return results
 }
 
-// ── Jadwal Slot ────────────────────────────────────────────────────────────
+// ── Slot Status (dari data sesi, deduplikasi hari+jam+kolam) ─────────────
 
-export interface JadwalSlot {
-  id: string
-  kolam: string
+export interface SlotInfo {
   hari: string
   jam_mulai: string
-  jam_selesai: string
+  jam_selesai: string  // estimasi jam_mulai + 60 menit
+  kolam: string
   status: 'tersedia' | 'penuh'
-  urutan: number
 }
 
-export const getJadwalSlot = async (): Promise<JadwalSlot[]> => {
-  const { data, error } = await supabase
-    .from('jadwal_slot')
+// Ambil semua slot unik dari sesi, gabungkan dengan status dari slot_status
+export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
+  // Ambil semua sesi
+  const { data: sesiData, error: sesiErr } = await supabase
+    .from('sesi')
+    .select('tanggal, jam, menit, durasi, kolam')
+  if (sesiErr) throw sesiErr
+
+  // Ambil status dari slot_status
+  const { data: statusData } = await supabase
+    .from('slot_status')
     .select('*')
-    .order('urutan', { ascending: true })
-  if (error) throw error
-  return data
+  const statusMap: Record<string, 'tersedia' | 'penuh'> = {}
+  ;(statusData ?? []).forEach((s: any) => {
+    statusMap[`${s.hari}__${s.jam_mulai}__${s.kolam}`] = s.status
+  })
+
+  // Deduplikasi: ambil kombinasi unik hari+jam+kolam dari sesi
+  const HARI_ID = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu']
+  const seen = new Set<string>()
+  const slots: SlotInfo[] = []
+
+  ;(sesiData ?? []).forEach((s: any) => {
+    const d = new Date(s.tanggal + 'T00:00:00')
+    const hari = HARI_ID[d.getDay()]
+    const jam_mulai = `${s.jam}:${s.menit}`
+    // Hitung jam selesai
+    const totalMenit = parseInt(s.jam) * 60 + parseInt(s.menit) + (s.durasi ?? 60)
+    const jam_selesai = `${String(Math.floor(totalMenit/60)%24).padStart(2,'0')}:${String(totalMenit%60).padStart(2,'0')}`
+    const key = `${hari}__${jam_mulai}__${s.kolam}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      slots.push({
+        hari,
+        jam_mulai,
+        jam_selesai,
+        kolam: s.kolam,
+        status: statusMap[key] ?? 'tersedia',
+      })
+    }
+  })
+
+  // Sort: by kolam, then hari order, then jam
+  const HARI_ORDER = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu']
+  slots.sort((a, b) => {
+    if (a.kolam !== b.kolam) return a.kolam.localeCompare(b.kolam)
+    const hA = HARI_ORDER.indexOf(a.hari), hB = HARI_ORDER.indexOf(b.hari)
+    if (hA !== hB) return hA - hB
+    return a.jam_mulai.localeCompare(b.jam_mulai)
+  })
+
+  return slots
 }
 
-export const updateJadwalSlotStatus = async (id: string, status: 'tersedia' | 'penuh') => {
+// Update status penuh/tersedia
+export const upsertSlotStatus = async (hari: string, jam_mulai: string, kolam: string, status: 'tersedia' | 'penuh') => {
   const { error } = await supabase
-    .from('jadwal_slot')
-    .update({ status })
-    .eq('id', id)
+    .from('slot_status')
+    .upsert({ hari, jam_mulai, kolam, status }, { onConflict: 'hari,jam_mulai,kolam' })
   if (error) throw error
 }
 
-export const addJadwalSlot = async (payload: Omit<JadwalSlot, 'id'>): Promise<JadwalSlot> => {
-  const { data, error } = await supabase
-    .from('jadwal_slot')
-    .insert(payload)
-    .select()
-    .single()
-  if (error) throw error
-  return data
-}
-
-export const deleteJadwalSlot = async (id: string) => {
-  const { error } = await supabase.from('jadwal_slot').delete().eq('id', id)
-  if (error) throw error
-}
+// Alias untuk kompatibilitas daftar publik
+export const getJadwalSlot = getSlotDariJadwal
+export type JadwalSlot = SlotInfo
