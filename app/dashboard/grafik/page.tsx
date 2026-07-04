@@ -23,7 +23,7 @@ export default function GrafikPage() {
     const init = async () => {
       try {
         const sesiAll = await getSesi(200)
-        const months = [...new Set(sesiAll.map((s) => s.tanggal.slice(0, 7)))].sort().reverse()
+        const months = Array.from(new Set(sesiAll.map((s) => s.tanggal.slice(0, 7)))).sort().reverse()
         setBulanList(months)
         if (months[0]) setBulan(months[0])
       } catch (e: any) { showToast('Gagal load: ' + e?.message, 'error') }

@@ -335,7 +335,7 @@ export default function DaftarPublikPage() {
                           const isSelected = form.jadwal_hari === s.hari && form.jadwal_jam === s.jam_mulai && form.catatan?.includes(s.kolam)
                           const isPenuh = s.status === 'penuh'
                           return (
-                            <button key={s.id}
+                            <button key={`${s.hari}-${s.jam_mulai}-${s.kolam}`}
                               disabled={isPenuh}
                               onClick={() => {
                                 if (isPenuh) return

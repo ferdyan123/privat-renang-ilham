@@ -25,7 +25,7 @@ export default function RekapPage() {
   const initBulan = useCallback(async () => {
     try {
       const sesiAll = await getSesi(200)
-      const months = [...new Set(sesiAll.map((s) => s.tanggal.slice(0, 7)))].sort().reverse()
+      const months = Array.from(new Set(sesiAll.map((s) => s.tanggal.slice(0, 7)))).sort().reverse()
       setBulanList(months)
       if (months[0] && !bulan) setBulan(months[0])
     } catch { showToast('Gagal load data', 'error') }

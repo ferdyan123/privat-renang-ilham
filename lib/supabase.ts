@@ -46,6 +46,8 @@ export interface PendingMember {
   paket: string
   jadwal_hari: string
   jadwal_jam: string
+  jumlah_sesi: number
+  harga: number
   bukti_tf_url: string | null
   catatan: string | null
   status: 'menunggu' | 'diterima' | 'ditolak'

@@ -49,7 +49,20 @@ export default function DaftarPage() {
     if (!confirm(`ACC pendaftaran ${d.nama_murid}?`)) return
     try {
       await updatePendingStatus(d.id, 'diterima')
-      await addMurid({ nama: d.nama_murid, paket: d.paket, wa_ortu: d.wa_ortu, kategori: 'normal' })
+      // Kolam disimpan sebagai teks di dalam catatan, format "Kolam: Kolam A"
+      const kolamMatch = d.catatan?.match(/Kolam:\s*([^|]+)/)
+      const kolam = kolamMatch ? kolamMatch[1].trim() : ''
+      await addMurid({
+        nama: d.nama_murid,
+        paket: d.paket,
+        wa_ortu: d.wa_ortu,
+        kategori: 'normal',
+        jadwal_hari: d.jadwal_hari,
+        jadwal_jam: d.jadwal_jam,
+        jadwal_kolam: kolam,
+        harga: d.harga ?? 0,
+        jumlah_sesi: d.jumlah_sesi ?? 4,
+      })
       showToast(`${d.nama_murid} diterima ✓`, 'success')
       loadPendaftaran()
     } catch { showToast('Gagal acc', 'error') }

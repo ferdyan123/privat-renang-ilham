@@ -80,7 +80,7 @@ function KirimPageContent() {
         jumlah_hadir: sesiUntukTagihan.length,
         status: 'belum_bayar',
         bukti_tf_url: null,
-        total_harga: murid.harga ?? 0,
+        total_harga: murid?.harga ?? 0,
       })
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
       setGeneratedLink(`${appUrl}/kartu?tagihan=${tagihan.id}`)
