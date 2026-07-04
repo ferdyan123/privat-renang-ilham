@@ -1,5 +1,5 @@
-// SwimTrack Service Worker — notifikasi murid siap tagih
-const CACHE_NAME = 'swimtrack-v1'
+// Privat Renang Ilham Service Worker — notifikasi murid siap tagih
+const CACHE_NAME = 'privat-renang-ilham-v1'
 
 self.addEventListener('install', (e) => {
   self.skipWaiting()
@@ -13,7 +13,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('push', (e) => {
   const data = e.data?.json() ?? {}
   const options = {
-    body: data.body || 'Ada notifikasi baru di SwimTrack',
+    body: data.body || 'Ada notifikasi baru di Privat Renang Ilham',
     icon: '/icon-192.png',
     badge: '/icon-192.png',
     vibrate: [200, 100, 200],
@@ -24,7 +24,7 @@ self.addEventListener('push', (e) => {
     ]
   }
   e.waitUntil(
-    self.registration.showNotification(data.title || 'SwimTrack', options)
+    self.registration.showNotification(data.title || 'Privat Renang Ilham', options)
   )
 })
 

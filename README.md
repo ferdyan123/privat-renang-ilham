@@ -1,4 +1,4 @@
-# SwimTrack — Aplikasi Manajemen Les Renang
+# Privat Renang Ilham — Aplikasi Manajemen Les Renang
 
 Sistem manajemen les renang berbasis Next.js 14 + Supabase.
 

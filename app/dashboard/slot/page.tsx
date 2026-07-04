@@ -196,7 +196,7 @@ export default function SlotPage() {
                 <i className="ti ti-copy text-base" />Salin Link
               </button>
               <button onClick={() => {
-                const msg = `Halo! Berikut link pendaftaran les renang SwimTrack:\n\n${generatedLink}\n\nSilakan pilih jadwal yang tersedia 🏊`
+                const msg = `Halo! Berikut link pendaftaran les renang Privat Renang Ilham:\n\n${generatedLink}\n\nSilakan pilih jadwal yang tersedia 🏊`
                 window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank')
               }}
                 className="flex-1 flex items-center justify-center gap-1.5 bg-[#25D366] text-white text-[13px] font-semibold py-2 rounded-md hover:bg-[#1ab254] transition-all">

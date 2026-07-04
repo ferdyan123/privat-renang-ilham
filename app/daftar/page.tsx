@@ -163,7 +163,7 @@ export default function DaftarPublikPage() {
               <i className="ti ti-ripple text-white text-lg" />
             </div>
             <div>
-              <div className="text-white text-[13px] font-bold leading-tight">SwimTrack</div>
+              <div className="text-white text-[13px] font-bold leading-tight">Privat Renang Ilham</div>
               <div className="text-white/60 text-[10px]">Pendaftaran Les Renang</div>
             </div>
           </div>

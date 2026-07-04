@@ -47,6 +47,19 @@ export const hitungHarga = (paket: string, kategori: string, jumlahSesi: number)
 export const fmtRupiah = (nominal: number): string =>
   'Rp ' + nominal.toLocaleString('id-ID')
 
+// Format angka jadi "300.000" (tanpa "Rp") untuk input harga yang bisa diketik manual
+export const formatRibuan = (n: number | string): string => {
+  const digits = String(n).replace(/\D/g, '')
+  if (!digits || digits === '0') return ''
+  return parseInt(digits, 10).toLocaleString('id-ID')
+}
+
+// Kebalikan formatRibuan — ambil angka murni dari string berformat "300.000"
+export const parseRibuan = (str: string): number => {
+  const digits = str.replace(/\D/g, '')
+  return digits ? parseInt(digits, 10) : 0
+}
+
 // Kolam preset — form bisa ketik custom
 export const KOLAM_PRESETS = ['Kolam A', 'Kolam B', 'Kolam VIP']
 // Alias untuk kompatibilitas file lama yang masih import KOLAM_LIST

@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { getMurid, getSesi, createTagihan, getSiklusBerjalan, Murid, Sesi } from '@/lib/supabase'
 import { fmtShort, fmtRupiah } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
@@ -22,6 +23,15 @@ interface SiklusInfo {
 }
 
 export default function KirimPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-12 text-text-muted text-sm"><i className="ti ti-loader-2 text-3xl block mb-2 animate-spin" />Memuat...</div>}>
+      <KirimPageContent />
+    </Suspense>
+  )
+}
+
+function KirimPageContent() {
+  const searchParams = useSearchParams()
   const [muridList, setMuridList] = useState<Murid[]>([])
   const [selectedMurid, setSelectedMurid] = useState('')
   const [siklus, setSiklus] = useState<SiklusInfo | null>(null)
@@ -30,17 +40,23 @@ export default function KirimPage() {
   const [generatedLink, setGeneratedLink] = useState('')
 
   useEffect(() => {
-    getMurid().then(setMuridList).catch(() => showToast('Gagal load murid', 'error'))
+    getMurid().then((list) => {
+      setMuridList(list)
+      const muridParam = searchParams.get('murid')
+      if (muridParam && list.some((m) => m.id === muridParam)) {
+        checkSiklus(muridParam, list)
+      }
+    }).catch(() => showToast('Gagal load murid', 'error'))
   }, [])
 
-  const checkSiklus = async (mid: string) => {
+  const checkSiklus = async (mid: string, list: Murid[] = muridList) => {
     setSelectedMurid(mid)
     setSiklus(null)
     setGeneratedLink('')
     if (!mid) return
     setLoading(true)
     try {
-      const murid = muridList.find((m) => m.id === mid)!
+      const murid = list.find((m) => m.id === mid)!
       const info = await getSiklusBerjalan(mid, murid.paket)
       const sesiAll = await getSesi(500)
       const sesiDetail = sesiAll
@@ -86,7 +102,7 @@ export default function KirimPage() {
     if (!generatedLink || !murid || !siklus) return
     const harga = murid.harga ?? 0
     const msg =
-`*Tagihan Les Renang - SwimTrack* 🏊
+`*Tagihan Les Renang - Privat Renang Ilham* 🏊
 
 Halo orang tua dari *${murid.nama}* 👋
 

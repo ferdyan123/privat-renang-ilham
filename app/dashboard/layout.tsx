@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { getPendingCount } from '@/lib/supabase'
+import { isLoggedIn, logout } from '@/lib/auth'
 import { ToastProvider } from '@/components/ui/Toast'
 import NotificationSetup from '@/components/ui/NotificationSetup'
 
@@ -20,6 +21,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname()
   const router = useRouter()
   const [pendingCount, setPendingCount] = useState(0)
+  const [authChecked, setAuthChecked] = useState(false)
+
+  useEffect(() => {
+    if (!isLoggedIn()) {
+      router.replace('/login')
+    } else {
+      setAuthChecked(true)
+    }
+  }, [router])
+
+  const handleLogout = () => {
+    if (!confirm('Keluar dari dashboard?')) return
+    logout()
+    router.replace('/login')
+  }
 
   useEffect(() => {
     const loadCounts = async () => {
@@ -42,7 +58,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const nowFmt = new Date().toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })
   const nowFull = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
-  const pageTitle = NAV.find((n) => isActive(n.href))?.label ?? 'SwimTrack'
+  const pageTitle = NAV.find((n) => isActive(n.href))?.label ?? 'Privat Renang Ilham'
+
+  if (!authChecked) return null
 
   return (
     <div className="flex min-h-screen">
@@ -52,7 +70,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="w-[34px] h-[34px] bg-[#185FA5] rounded-md flex items-center justify-center flex-shrink-0">
             <i className="ti ti-ripple text-white text-xl" />
           </div>
-          <span className="text-base font-semibold text-text">SwimTrack</span>
+          <span className="text-base font-semibold text-text">Privat Renang Ilham</span>
         </div>
         <div className="text-[11px] text-text-muted px-5 mb-2">{nowFull}</div>
         <nav className="flex flex-col gap-0.5 px-[10px]">
@@ -76,6 +94,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
           ))}
         </nav>
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-[10px] px-3 py-[9px] mx-[10px] mt-auto rounded-[10px] text-[13px] font-medium text-red hover:bg-red/5 transition-all"
+        >
+          <i className="ti ti-logout text-[18px] flex-shrink-0" />Keluar
+        </button>
       </aside>
 
       {/* ── MAIN ── */}
@@ -85,8 +109,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="w-8 h-8 bg-[#185FA5] rounded-md flex items-center justify-center flex-shrink-0">
             <i className="ti ti-ripple text-white text-[18px]" />
           </div>
-          <span className="text-base font-semibold text-text">SwimTrack</span>
-          <span className="text-[12px] text-text-muted ml-auto">{nowFmt}</span>
+          <span className="text-base font-semibold text-text">Privat Renang Ilham</span>
+          <span className="text-[12px] text-text-muted ml-auto mr-1">{nowFmt}</span>
+          <button onClick={handleLogout} className="w-8 h-8 flex items-center justify-center rounded-full text-red hover:bg-red/5 transition-all flex-shrink-0">
+            <i className="ti ti-logout text-[18px]" />
+          </button>
         </div>
 
         {/* Mobile tabs */}

@@ -1,6 +1,6 @@
 {
-  "name": "SwimTrack",
-  "short_name": "SwimTrack",
+  "name": "Privat Renang Ilham",
+  "short_name": "PR Ilham",
   "description": "Aplikasi manajemen les renang",
   "start_url": "/dashboard",
   "display": "standalone",

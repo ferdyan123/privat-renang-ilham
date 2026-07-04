@@ -282,7 +282,7 @@ function KartuContent() {
             <i className="ti ti-ripple text-white text-xl" />
           </div>
           <div>
-            <div className="text-white text-[15px] font-bold">SwimTrack</div>
+            <div className="text-white text-[15px] font-bold">Privat Renang Ilham</div>
             <div className="text-white/70 text-[11px]">Kartu Kehadiran · Siklus #{data.siklus}</div>
           </div>
         </div>
@@ -427,7 +427,7 @@ function KartuContent() {
         )}
 
         <div className="text-center text-[11px] text-gray-400 pb-4">
-          SwimTrack · {new Date().getFullYear()}
+          Privat Renang Ilham · {new Date().getFullYear()}
         </div>
       </div>
       </div>

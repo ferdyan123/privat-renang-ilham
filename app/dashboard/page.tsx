@@ -64,7 +64,9 @@ export default function HariIniPage() {
   const saveAbsen = async (sesiId: string) => {
     setSavingSesi(sesiId)
     try {
-      const records = muridList.map((m) => ({
+      const sesi = sesiList.find((s) => s.id === sesiId)
+      const relevantMurid = sesi ? muridUntukSesi(sesi) : muridList
+      const records = relevantMurid.map((m) => ({
         sesi_id: sesiId,
         murid_id: m.id,
         status: absenMap[sesiId]?.[m.id] ?? 'alpha',
@@ -104,8 +106,18 @@ export default function HariIniPage() {
     finally { setSaving(false) }
   }
 
-  const hadirCount = (sesiId: string) =>
-    muridList.filter((m) => absenMap[sesiId]?.[m.id] === 'hadir').length
+  const hadirCount = (sesiId: string, murids: Murid[] = muridList) =>
+    murids.filter((m) => absenMap[sesiId]?.[m.id] === 'hadir').length
+
+  // Cuma murid yang jadwal tetapnya (hari+jam+kolam) cocok sama sesi ini
+  const HARI_ID = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu']
+  const muridUntukSesi = (s: Sesi) => {
+    const hari = HARI_ID[new Date(s.tanggal + 'T00:00:00').getDay()]
+    const jamMulai = `${s.jam}:${s.menit}`
+    return muridList.filter((m) =>
+      m.jadwal_hari === hari && m.jadwal_jam === jamMulai && m.jadwal_kolam === s.kolam
+    )
+  }
 
   // Konfigurasi 3 tombol status
   const STATUS_BTNS: { key: Absensi['status']; label: string; icon: string }[] = [
@@ -153,7 +165,7 @@ export default function HariIniPage() {
                 <div className="text-[12px] font-medium text-text">{murid.nama}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-green font-semibold">{jumlahHadir}/{jumlahTarget}x hadir</span>
-                  <a href="/dashboard/kirim"
+                  <a href={`/dashboard/kirim?murid=${murid.id}`}
                     className="text-[11px] bg-green text-white px-2 py-0.5 rounded-full hover:bg-green/80 transition-all">
                     Tagih →
                   </a>
@@ -180,8 +192,9 @@ export default function HariIniPage() {
 
       {/* Sesi cards */}
       {sesiList.map((s) => {
-        const hadir = hadirCount(s.id)
-        const pct = muridList.length ? Math.round(hadir / muridList.length * 100) : 0
+        const muridSesi = muridUntukSesi(s)
+        const hadir = hadirCount(s.id, muridSesi)
+        const pct = muridSesi.length ? Math.round(hadir / muridSesi.length * 100) : 0
         return (
           <div key={s.id} className="bg-bg border border-border rounded-lg mb-3 overflow-hidden shadow-sm">
             <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
@@ -190,7 +203,7 @@ export default function HariIniPage() {
                 <div className="text-[12px] text-text-muted">{s.kolam} · {s.durasi} menit</div>
               </div>
               <div className="ml-auto flex items-center gap-3">
-                <div className="text-[13px] text-text-muted">{hadir}/{muridList.length}</div>
+                <div className="text-[13px] text-text-muted">{hadir}/{muridSesi.length}</div>
                 <div className="w-10 h-10 relative">
                   <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
                     <circle cx="18" cy="18" r="15.9" fill="none" stroke="#E6F1FB" strokeWidth="3" />
@@ -202,9 +215,12 @@ export default function HariIniPage() {
               </div>
             </div>
 
-            {/* List murid dengan 3 tombol status */}
+            {/* List murid dengan 3 tombol status — cuma murid yang jadwalnya cocok sesi ini */}
             <div className="p-3 flex flex-col gap-2">
-              {muridList.map((m) => {
+              {muridSesi.length === 0 && (
+                <div className="text-center py-3 text-text-muted text-[12px]">Belum ada murid dengan jadwal tetap di sesi ini</div>
+              )}
+              {muridSesi.map((m) => {
                 const st = absenMap[s.id]?.[m.id]
                 return (
                   <div key={m.id} className="flex items-center gap-2.5 px-2 py-1.5">
