@@ -5,6 +5,7 @@ import { getPendingCount } from '@/lib/supabase'
 import { isLoggedIn, logout } from '@/lib/auth'
 import { ToastProvider } from '@/components/ui/Toast'
 import NotificationSetup from '@/components/ui/NotificationSetup'
+import Modal from '@/components/ui/Modal'
 
 const NAV = [
   { tab: 'hari-ini',   href: '/dashboard',          icon: 'ti-calendar-check', label: 'Hari Ini' },
@@ -17,11 +18,17 @@ const NAV = [
   { tab: 'slot',       href: '/dashboard/slot',     icon: 'ti-calendar-event',  label: 'Slot' },
 ]
 
+// Menu utama yang selalu keliatan di nav mobile (biar nggak sesak/berdempetan)
+const MOBILE_PRIMARY_TABS = ['hari-ini', 'murid', 'jadwal', 'kirim']
+const NAV_PRIMARY = NAV.filter((n) => MOBILE_PRIMARY_TABS.includes(n.tab))
+const NAV_MORE = NAV.filter((n) => !MOBILE_PRIMARY_TABS.includes(n.tab))
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
   const [pendingCount, setPendingCount] = useState(0)
   const [authChecked, setAuthChecked] = useState(false)
+  const [showMore, setShowMore] = useState(false)
 
   useEffect(() => {
     if (!isLoggedIn()) {
@@ -116,13 +123,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </button>
         </div>
 
-        {/* Mobile tabs */}
-        <nav className="lg:hidden sticky top-[57px] z-[19] bg-bg border-b border-border flex overflow-x-auto scrollbar-none">
-          {NAV.map((n) => (
+        {/* Mobile tabs — cuma menu utama + Lainnya, biar nggak sesak */}
+        <nav className="lg:hidden sticky top-[57px] z-[19] bg-bg border-b border-border flex">
+          {NAV_PRIMARY.map((n) => (
             <button
               key={n.tab}
               onClick={() => router.push(n.href)}
-              className={`relative flex-1 min-w-[48px] flex flex-col items-center py-[10px] px-[6px] text-[10px] font-medium border-b-2 transition-all whitespace-nowrap ${
+              className={`relative flex-1 flex flex-col items-center py-[10px] px-[6px] text-[10px] font-medium border-b-2 transition-all ${
                 isActive(n.href)
                   ? 'text-[#185FA5] border-[#185FA5]'
                   : 'text-text-muted border-transparent'
@@ -130,14 +137,50 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             >
               <i className={`ti ${n.icon} text-[18px] mb-0.5`} />
               {n.label}
-              {n.badge && pendingCount > 0 && (
-                <span className="absolute top-1 right-[calc(50%-22px)] bg-[#E24B4A] text-white text-[9px] font-bold rounded-full px-[5px] leading-[14px]">
-                  {pendingCount}
-                </span>
-              )}
             </button>
           ))}
+          <button
+            onClick={() => setShowMore(true)}
+            className={`relative flex-1 flex flex-col items-center py-[10px] px-[6px] text-[10px] font-medium border-b-2 transition-all ${
+              NAV_MORE.some((n) => isActive(n.href))
+                ? 'text-[#185FA5] border-[#185FA5]'
+                : 'text-text-muted border-transparent'
+            }`}
+          >
+            <i className="ti ti-dots text-[18px] mb-0.5" />
+            Lainnya
+            {pendingCount > 0 && (
+              <span className="absolute top-1 right-[calc(50%-22px)] bg-[#E24B4A] text-white text-[9px] font-bold rounded-full px-[5px] leading-[14px]">
+                {pendingCount}
+              </span>
+            )}
+          </button>
         </nav>
+
+        {/* Bottom sheet: menu lainnya (mobile) */}
+        <Modal open={showMore} onClose={() => setShowMore(false)} title="Menu Lainnya">
+          <div className="grid grid-cols-2 gap-2.5">
+            {NAV_MORE.map((n) => (
+              <button
+                key={n.tab}
+                onClick={() => { router.push(n.href); setShowMore(false) }}
+                className={`relative flex items-center gap-2.5 px-3.5 py-3 rounded-xl border text-left transition-all ${
+                  isActive(n.href)
+                    ? 'border-[#185FA5] bg-blue-light text-[#185FA5]'
+                    : 'border-border text-text'
+                }`}
+              >
+                <i className={`ti ${n.icon} text-[20px] flex-shrink-0`} />
+                <span className="text-[13px] font-medium">{n.label}</span>
+                {n.badge && pendingCount > 0 && (
+                  <span className="absolute top-2 right-2 bg-[#E24B4A] text-white text-[9px] font-bold rounded-full px-[6px] py-0 leading-[14px]">
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </Modal>
 
         {/* Desktop header */}
         <div className="hidden lg:flex items-center justify-between px-7 pt-5 pb-4 border-b border-border">
