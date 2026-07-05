@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { getSesiByTanggal, getMurid, getAbsensi, upsertAbsensiBatch, addSesi, getMuridSiapTagih, Sesi, Murid, Absensi } from '@/lib/supabase'
 import { sendLocalNotif } from '@/components/ui/NotificationSetup'
 import { fmtTgl, todayStr, KOLAM_PRESETS, jamSelesai } from '@/lib/utils'
@@ -9,6 +9,8 @@ import Avatar from '@/components/ui/Avatar'
 
 export default function HariIniPage() {
   const today = todayStr()
+  const [selectedDate, setSelectedDate] = useState(today)
+  const dateInputRef = useRef<HTMLInputElement>(null)
   const [sesiList, setSesiList] = useState<Sesi[]>([])
   const [muridList, setMuridList] = useState<Murid[]>([])
   const [absenMap, setAbsenMap] = useState<Record<string, Record<string, Absensi['status']>>>({})
@@ -30,7 +32,7 @@ export default function HariIniPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [sesi, murid] = await Promise.all([getSesiByTanggal(today), getMurid()])
+      const [sesi, murid] = await Promise.all([getSesiByTanggal(selectedDate), getMurid()])
       setSesiList(sesi)
       setMuridList(murid)
       const map: Record<string, Record<string, Absensi['status']>> = {}
@@ -49,7 +51,10 @@ export default function HariIniPage() {
 
   useEffect(() => {
     load()
-    // Cek siap tagih saat halaman dibuka
+  }, [selectedDate])
+
+  useEffect(() => {
+    // Cek siap tagih saat halaman dibuka (nggak perlu diulang tiap ganti tanggal)
     getMuridSiapTagih().then(setSiapTagihList).catch(() => {})
   }, [])
 
@@ -95,7 +100,7 @@ export default function HariIniPage() {
   const tambahSesi = async () => {
     setSaving(true)
     try {
-      await addSesi({ tanggal: today, jam, menit, durasi, kolam })
+      await addSesi({ tanggal: selectedDate, jam, menit, durasi, kolam })
       showToast('Sesi ditambahkan ✓', 'success')
       setShowTambah(false)
       load()
@@ -135,16 +140,44 @@ export default function HariIniPage() {
 
   return (
     <div className="max-w-[720px] mx-auto">
-      {/* Header hari ini */}
+      {/* Header tanggal — bisa diklik buat pilih tanggal lain */}
       <div className="bg-[#185FA5] text-white rounded-lg p-4 mb-4 flex items-start justify-between">
-        <div>
-          <div className="text-[13px] opacity-80 mb-0.5">Hari ini</div>
-          <div className="text-[17px] font-semibold">{fmtTgl(today)}</div>
-          <div className="text-[13px] opacity-80 mt-1">{sesiList.length} sesi · {muridList.length} murid aktif</div>
+        <div className="relative">
+          <div className="text-[13px] opacity-80 mb-0.5">
+            {selectedDate === today ? 'Hari ini' : 'Tanggal dipilih'}
+          </div>
+          <button
+            onClick={() => {
+              const el = dateInputRef.current
+              if (!el) return
+              if (typeof (el as any).showPicker === 'function') (el as any).showPicker()
+              else el.click()
+            }}
+            className="text-[17px] font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all"
+          >
+            {fmtTgl(selectedDate)}
+            <i className="ti ti-chevron-down text-[15px]" />
+          </button>
+          <input
+            ref={dateInputRef}
+            type="date"
+            value={selectedDate}
+            onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+            className="absolute inset-0 w-full opacity-0 pointer-events-none"
+            tabIndex={-1}
+          />
+          <div className="text-[13px] opacity-80 mt-1 flex items-center gap-2">
+            {sesiList.length} sesi · {muridList.length} murid aktif
+            {selectedDate !== today && (
+              <button onClick={() => setSelectedDate(today)} className="underline hover:opacity-80">
+                Kembali ke hari ini
+              </button>
+            )}
+          </div>
         </div>
         <button
           onClick={() => setShowTambah(true)}
-          className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-[13px] px-3 py-2 rounded-md font-medium transition-all"
+          className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-[13px] px-3 py-2 rounded-md font-medium transition-all flex-shrink-0"
         >
           <i className="ti ti-plus text-base" />Tambah Sesi
         </button>
@@ -185,7 +218,7 @@ export default function HariIniPage() {
       {!loading && sesiList.length === 0 && (
         <div className="text-center py-12 text-text-muted">
           <i className="ti ti-calendar-off text-4xl block mb-2 opacity-40" />
-          <p className="text-sm">Belum ada sesi hari ini</p>
+          <p className="text-sm">Belum ada sesi di tanggal ini</p>
           <button onClick={() => setShowTambah(true)} className="mt-3 text-[#185FA5] text-sm font-medium">+ Tambah sesi</button>
         </div>
       )}
@@ -264,7 +297,7 @@ export default function HariIniPage() {
       })}
 
       {/* Modal tambah sesi */}
-      <Modal open={showTambah} onClose={() => setShowTambah(false)} title="Tambah Sesi Hari Ini">
+      <Modal open={showTambah} onClose={() => setShowTambah(false)} title={selectedDate === today ? 'Tambah Sesi Hari Ini' : `Tambah Sesi — ${fmtTgl(selectedDate)}`}>
         <div className="flex flex-col gap-3">
           <div>
             <label className="text-[12px] text-text-muted block mb-1">Jam mulai</label>
