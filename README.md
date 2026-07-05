@@ -80,6 +80,27 @@ CREATE TABLE IF NOT EXISTS pending_members (
   bukti_tf_url text,
   catatan text,
   status text default 'menunggu',
+  created_at timestamptz default now(),
+  kode_promo text,
+  diskon integer default 0
+);
+
+-- Kolom kuota di slot_status (kalau tabel sudah ada dari sebelumnya, jalankan ALTER ini)
+ALTER TABLE slot_status ADD COLUMN IF NOT EXISTS kuota integer;
+
+-- Kolom kode_promo & diskon di pending_members (kalau tabel sudah ada dari sebelumnya)
+ALTER TABLE pending_members ADD COLUMN IF NOT EXISTS kode_promo text;
+ALTER TABLE pending_members ADD COLUMN IF NOT EXISTS diskon integer default 0;
+
+-- Tabel promo / kode referral
+CREATE TABLE IF NOT EXISTS promo (
+  id uuid primary key default gen_random_uuid(),
+  kode text unique not null,
+  tipe text not null default 'baru', -- 'baru' | 'lama'
+  diskon_nominal integer not null default 0,
+  kuota integer not null default 1,
+  terpakai integer not null default 0,
+  aktif boolean not null default true,
   created_at timestamptz default now()
 );
 ```

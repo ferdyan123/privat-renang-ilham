@@ -1,0 +1,752 @@
+diff --git a/README.md b/README.md
+index e15f08f..434dfe9 100644
+--- a/README.md
++++ b/README.md
+@@ -80,6 +80,27 @@ CREATE TABLE IF NOT EXISTS pending_members (
+   bukti_tf_url text,
+   catatan text,
+   status text default 'menunggu',
++  created_at timestamptz default now(),
++  kode_promo text,
++  diskon integer default 0
++);
++
++-- Kolom kuota di slot_status (kalau tabel sudah ada dari sebelumnya, jalankan ALTER ini)
++ALTER TABLE slot_status ADD COLUMN IF NOT EXISTS kuota integer;
++
++-- Kolom kode_promo & diskon di pending_members (kalau tabel sudah ada dari sebelumnya)
++ALTER TABLE pending_members ADD COLUMN IF NOT EXISTS kode_promo text;
++ALTER TABLE pending_members ADD COLUMN IF NOT EXISTS diskon integer default 0;
++
++-- Tabel promo / kode referral
++CREATE TABLE IF NOT EXISTS promo (
++  id uuid primary key default gen_random_uuid(),
++  kode text unique not null,
++  tipe text not null default 'baru', -- 'baru' | 'lama'
++  diskon_nominal integer not null default 0,
++  kuota integer not null default 1,
++  terpakai integer not null default 0,
++  aktif boolean not null default true,
+   created_at timestamptz default now()
+ );
+ ```
+diff --git a/app/daftar/page.tsx b/app/daftar/page.tsx
+index a3db889..034b20d 100644
+--- a/app/daftar/page.tsx
++++ b/app/daftar/page.tsx
+@@ -1,6 +1,6 @@
+ 'use client'
+ import { useState, useEffect } from 'react'
+-import { supabase, getJadwalSlot, JadwalSlot } from '@/lib/supabase'
++import { supabase, getJadwalSlot, JadwalSlot, adaPromoAktif, validasiPromo, pakaiPromo, PromoInfo } from '@/lib/supabase'
+ import { HARGA_BASE, hitungHarga, fmtRupiah } from '@/lib/utils'
+ import { ToastProvider, showToast } from '@/components/ui/Toast'
+ 
+@@ -42,6 +42,13 @@ export default function DaftarPublikPage() {
+   const [buktiFile, setBuktiFile] = useState<File | null>(null)
+   const [preview, setPreview] = useState<string | null>(null)
+ 
++  // Kode referral
++  const [showPromoBox, setShowPromoBox] = useState(false)
++  const [kodePromoInput, setKodePromoInput] = useState('')
++  const [promoValid, setPromoValid] = useState<PromoInfo | null>(null)
++  const [promoChecking, setPromoChecking] = useState(false)
++  const [promoError, setPromoError] = useState('')
++
+   const [form, setForm] = useState({
+     nama_murid: '', usia: '', jenis_kelamin: '', kategori: '',
+     paket: '', jumlah_sesi: '4', jadwal_hari: '', jadwal_jam: '', catatan: '',
+@@ -52,6 +59,7 @@ export default function DaftarPublikPage() {
+ 
+   useEffect(() => {
+     getJadwalSlot().then(setJadwalSlots).catch(() => {})
++    adaPromoAktif().then(setShowPromoBox).catch(() => {})
+   }, [])
+ 
+   // Hitung harga berdasarkan pilihan
+@@ -59,6 +67,27 @@ export default function DaftarPublikPage() {
+     ? hitungHarga(form.paket, form.kategori, parseInt(form.jumlah_sesi))
+     : 0
+ 
++  const diskonAktif = promoValid ? Math.min(promoValid.diskon_nominal, hargaSekarang) : 0
++  const totalSetelahDiskon = Math.max(0, hargaSekarang - diskonAktif)
++
++  const cekKodePromo = async () => {
++    if (!kodePromoInput.trim()) return
++    setPromoChecking(true)
++    setPromoError('')
++    try {
++      const hasil = await validasiPromo(kodePromoInput)
++      if (!hasil) {
++        setPromoValid(null)
++        setPromoError('Kode tidak valid atau sudah habis')
++      } else {
++        setPromoValid(hasil)
++        showToast(`Kode ${hasil.kode} berhasil dipakai ✓`, 'success')
++      }
++    } catch (e: any) {
++      setPromoError('Gagal cek kode: ' + e?.message)
++    } finally { setPromoChecking(false) }
++  }
++
+   const stepValid = () => {
+     if (step === 0) return form.nama_murid.trim() && form.usia && form.jenis_kelamin && form.kategori && form.nama_ortu.trim() && form.wa_ortu.trim()
+     if (step === 1) return form.paket && form.jumlah_sesi && form.jadwal_hari && form.jadwal_jam
+@@ -94,12 +123,20 @@ export default function DaftarPublikPage() {
+         jadwal_hari: form.jadwal_hari,
+         jadwal_jam: form.jadwal_jam,
+         bukti_tf_url,
+-        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Sesi: ${form.jumlah_sesi}x | Harga: ${fmtRupiah(hargaSekarang)}${form.catatan ? ' | ' + form.catatan : ''}`,
++        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Sesi: ${form.jumlah_sesi}x | Harga: ${fmtRupiah(hargaSekarang)}${promoValid ? ` | Promo: ${promoValid.kode} (-${fmtRupiah(diskonAktif)})` : ''}${form.catatan ? ' | ' + form.catatan : ''}`,
+         jumlah_sesi: parseInt(form.jumlah_sesi),
+-        harga: hargaSekarang,
++        harga: totalSetelahDiskon,
++        kode_promo: promoValid?.kode ?? null,
++        diskon: diskonAktif,
+         status: 'menunggu',
+       })
+       if (error) throw error
++
++      // Tandai kode promo sudah kepakai (kuota abis → otomatis nonaktif)
++      if (promoValid) {
++        try { await pakaiPromo(promoValid.id, promoValid.terpakai, promoValid.kuota) } catch {}
++      }
++
+       setDone(true)
+     } catch (e: any) {
+       showToast(e?.message || 'Gagal mendaftar', 'error')
+@@ -358,9 +395,19 @@ export default function DaftarPublikPage() {
+                                   Kelas Penuh
+                                 </span>
+                               ) : isSelected ? (
+-                                <i className="ti ti-check text-[#185FA5] text-base" />
++                                <div className="flex items-center gap-1.5">
++                                  {s.kuota !== null && (
++                                    <span className="text-[10px] text-gray-400">Sisa {s.kuota}</span>
++                                  )}
++                                  <i className="ti ti-check text-[#185FA5] text-base" />
++                                </div>
+                               ) : (
+-                                <span className="text-[10px] text-green-500 font-semibold">Tersedia</span>
++                                <div className="text-right">
++                                  <span className="text-[10px] text-green-500 font-semibold block">Tersedia</span>
++                                  {s.kuota !== null && (
++                                    <span className="text-[9px] text-gray-400">Sisa {s.kuota} anak</span>
++                                  )}
++                                </div>
+                               )}
+                             </button>
+                           )
+@@ -390,6 +437,43 @@ export default function DaftarPublikPage() {
+               <div className="text-[14px] font-bold text-gray-800 flex items-center gap-2 pb-1 border-b border-gray-100">
+                 💳 Pembayaran
+               </div>
++              {/* Kode Referral — cuma muncul kalau ada kode promo aktif */}
++              {showPromoBox && (
++                <div>
++                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">
++                    Kode Referral <span className="normal-case text-gray-300">(opsional)</span>
++                  </label>
++                  {promoValid ? (
++                    <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-3.5 py-2.5">
++                      <div className="flex items-center gap-2">
++                        <i className="ti ti-circle-check text-green-500 text-base" />
++                        <div>
++                          <div className="text-[12px] font-bold text-green-700">{promoValid.kode}</div>
++                          <div className="text-[11px] text-green-600">Potongan {fmtRupiah(diskonAktif)}</div>
++                        </div>
++                      </div>
++                      <button onClick={() => { setPromoValid(null); setKodePromoInput(''); setPromoError('') }}
++                        className="text-[11px] text-gray-400 font-medium">× Hapus</button>
++                    </div>
++                  ) : (
++                    <>
++                      <div className="flex gap-2">
++                        <input
++                          value={kodePromoInput}
++                          onChange={(e) => { setKodePromoInput(e.target.value.toUpperCase()); setPromoError('') }}
++                          placeholder="Contoh: IBU2026"
++                          className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] font-mono font-semibold tracking-wide text-gray-800 focus:outline-none focus:border-[#185FA5]"
++                        />
++                        <button onClick={cekKodePromo} disabled={promoChecking || !kodePromoInput.trim()}
++                          className="px-4 rounded-xl bg-[#185FA5] text-white text-[12px] font-semibold disabled:opacity-40">
++                          {promoChecking ? <i className="ti ti-loader-2 animate-spin text-base" /> : 'Pakai'}
++                        </button>
++                      </div>
++                      {promoError && <div className="text-[11px] text-red-400 mt-1">{promoError}</div>}
++                    </>
++                  )}
++                </div>
++              )}
+               {/* Ringkasan */}
+               <div className="bg-[#E6F4FB] rounded-xl p-3.5">
+                 <div className="text-[11px] font-semibold text-[#185FA5] uppercase tracking-wide mb-2">Ringkasan</div>
+@@ -400,11 +484,15 @@ export default function DaftarPublikPage() {
+                     ['Sesi', form.jumlah_sesi + 'x/bulan'],
+                     ['Kategori', form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'],
+                     ['Jadwal', `${form.jadwal_hari} · ${form.jadwal_jam}`],
+-                    ['Total Biaya', hargaSekarang > 0 ? fmtRupiah(hargaSekarang) : '-'],
++                    ...(promoValid ? [
++                      ['Subtotal', hargaSekarang > 0 ? fmtRupiah(hargaSekarang) : '-'],
++                      ['Diskon', `- ${fmtRupiah(diskonAktif)}`],
++                    ] : []),
++                    ['Total Biaya', totalSetelahDiskon > 0 ? fmtRupiah(totalSetelahDiskon) : (hargaSekarang > 0 ? fmtRupiah(hargaSekarang) : '-')],
+                   ].map(([k,v]) => (
+                     <div key={k} className="flex justify-between">
+                       <span className="text-gray-400">{k}</span>
+-                      <strong className="text-gray-800 text-right max-w-[200px]">{v}</strong>
++                      <strong className={`text-right max-w-[200px] ${k === 'Total Biaya' ? 'text-[#185FA5]' : k === 'Diskon' ? 'text-green-600' : 'text-gray-800'}`}>{v}</strong>
+                     </div>
+                   ))}
+                 </div>
+diff --git a/app/dashboard/layout.tsx b/app/dashboard/layout.tsx
+index 37d5ce9..46775d8 100644
+--- a/app/dashboard/layout.tsx
++++ b/app/dashboard/layout.tsx
+@@ -16,6 +16,7 @@ const NAV = [
+   { tab: 'kirim',      href: '/dashboard/kirim',     icon: 'ti-send',           label: 'Kirim' },
+   { tab: 'daftar',     href: '/dashboard/daftar',    icon: 'ti-user-plus',      label: 'Daftar', badge: true },
+   { tab: 'slot',       href: '/dashboard/slot',     icon: 'ti-calendar-event',  label: 'Slot' },
++  { tab: 'promo',      href: '/dashboard/promo',    icon: 'ti-discount-2',      label: 'Promo' },
+ ]
+ 
+ // Menu utama yang selalu keliatan di nav mobile (biar nggak sesak/berdempetan)
+diff --git a/app/dashboard/promo/page.tsx b/app/dashboard/promo/page.tsx
+new file mode 100644
+index 0000000..d16dc54
+--- /dev/null
++++ b/app/dashboard/promo/page.tsx
+@@ -0,0 +1,198 @@
++'use client'
++import { useEffect, useState } from 'react'
++import { getAllPromo, createPromo, nonaktifkanPromo, PromoInfo } from '@/lib/supabase'
++import { formatRibuan, parseRibuan, fmtRupiah } from '@/lib/utils'
++import { showToast } from '@/components/ui/Toast'
++
++export default function PromoPage() {
++  const [promoList, setPromoList] = useState<PromoInfo[]>([])
++  const [loading, setLoading] = useState(true)
++  const [saving, setSaving] = useState(false)
++
++  const [tipe, setTipe] = useState<'baru' | 'lama'>('baru')
++  const [kode, setKode] = useState('')
++  const [diskonStr, setDiskonStr] = useState('')
++  const [kuota, setKuota] = useState('')
++
++  const load = async () => {
++    setLoading(true)
++    try { setPromoList(await getAllPromo()) }
++    catch (e: any) { showToast('Gagal load promo: ' + e?.message, 'error') }
++    finally { setLoading(false) }
++  }
++
++  useEffect(() => { load() }, [])
++
++  const resetForm = () => {
++    setKode(''); setDiskonStr(''); setKuota(''); setTipe('baru')
++  }
++
++  const apply = async () => {
++    if (!kode.trim()) return showToast('Kode referral wajib diisi', 'error')
++    const diskon = parseRibuan(diskonStr)
++    const kuotaNum = parseInt(kuota)
++    if (!diskon || diskon <= 0) return showToast('Nominal diskon wajib diisi', 'error')
++    if (!kuotaNum || kuotaNum <= 0) return showToast('Kuota wajib diisi', 'error')
++
++    setSaving(true)
++    try {
++      await createPromo(kode, tipe, diskon, kuotaNum)
++      showToast(`Kode ${kode.toUpperCase()} aktif ✓`, 'success')
++      resetForm()
++      load()
++    } catch (e: any) {
++      showToast(
++        e?.message?.includes('duplicate') ? 'Kode sudah dipakai, coba kode lain' : 'Gagal: ' + e?.message,
++        'error'
++      )
++    } finally { setSaving(false) }
++  }
++
++  const matikan = async (p: PromoInfo) => {
++    if (!confirm(`Nonaktifkan kode ${p.kode}?`)) return
++    try {
++      await nonaktifkanPromo(p.id)
++      showToast('Kode dinonaktifkan', 'success')
++      load()
++    } catch (e: any) { showToast('Gagal: ' + e?.message, 'error') }
++  }
++
++  const statusPromo = (p: PromoInfo): 'aktif' | 'habis' | 'nonaktif' => {
++    if (!p.aktif) return p.terpakai >= p.kuota ? 'habis' : 'nonaktif'
++    return 'aktif'
++  }
++
++  return (
++    <div className="max-w-[720px] mx-auto">
++      {/* Info cara kerja */}
++      <div className="bg-blue-light border border-blue/20 rounded-lg px-4 py-3 mb-4 text-[12px] text-blue">
++        <div className="font-semibold mb-1 flex items-center gap-1.5">
++          <i className="ti ti-info-circle text-sm" />Cara kerja Kode Referral
++        </div>
++        <div className="text-blue/70 leading-relaxed">
++          Buat kode referral di bawah lalu klik <strong>Apply</strong> untuk mengaktifkan. Kode otomatis muncul sebagai
++          kolom opsional di form pendaftaran (<strong>/daftar</strong>) — orang tua tinggal ketik kodenya sendiri untuk dapat potongan harga.
++          Kalau kuota pemakaian sudah habis, kode otomatis nonaktif (expired).
++        </div>
++      </div>
++
++      {/* Form buat kode baru */}
++      <div className="bg-bg border border-border rounded-lg p-4 shadow-sm mb-5">
++        <div className="text-[14px] font-semibold text-text mb-3">Buat Kode Referral Baru</div>
++
++        <div className="flex flex-col gap-3">
++          <div>
++            <label className="text-[11px] font-semibold text-text-muted uppercase tracking-wide block mb-1.5">
++              Target
++            </label>
++            <div className="flex gap-2">
++              {(['baru', 'lama'] as const).map((t) => (
++                <button key={t} onClick={() => setTipe(t)}
++                  className={`flex-1 py-2 rounded-md border text-[13px] font-medium transition-all ${
++                    tipe === t ? 'border-blue bg-blue-light text-blue font-semibold' : 'border-border text-text-muted'
++                  }`}>
++                  {t === 'baru' ? 'Murid Baru' : 'Murid Lama'}
++                </button>
++              ))}
++            </div>
++          </div>
++
++          <div>
++            <label className="text-[11px] font-semibold text-text-muted uppercase tracking-wide block mb-1.5">
++              Kode Referral
++            </label>
++            <input
++              value={kode}
++              onChange={(e) => setKode(e.target.value.toUpperCase())}
++              placeholder="Contoh: IBU2026"
++              className="w-full border border-border rounded-md px-3 py-2 text-[13px] font-mono font-semibold tracking-wide text-text focus:outline-none focus:border-blue"
++            />
++          </div>
++
++          <div className="grid grid-cols-2 gap-3">
++            <div>
++              <label className="text-[11px] font-semibold text-text-muted uppercase tracking-wide block mb-1.5">
++                Nominal Diskon (Rp)
++              </label>
++              <input
++                value={diskonStr}
++                onChange={(e) => setDiskonStr(formatRibuan(e.target.value))}
++                placeholder="50.000"
++                inputMode="numeric"
++                className="w-full border border-border rounded-md px-3 py-2 text-[13px] text-text focus:outline-none focus:border-blue"
++              />
++            </div>
++            <div>
++              <label className="text-[11px] font-semibold text-text-muted uppercase tracking-wide block mb-1.5">
++                Kuota (orang)
++              </label>
++              <input
++                value={kuota}
++                onChange={(e) => setKuota(e.target.value.replace(/\D/g, ''))}
++                placeholder="10"
++                inputMode="numeric"
++                className="w-full border border-border rounded-md px-3 py-2 text-[13px] text-text focus:outline-none focus:border-blue"
++              />
++            </div>
++          </div>
++
++          <button onClick={apply} disabled={saving}
++            className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-[14px] font-semibold hover:bg-[#0C447C] transition-all disabled:opacity-50 flex items-center justify-center gap-2">
++            {saving ? <i className="ti ti-loader-2 animate-spin text-base" /> : <i className="ti ti-check text-base" />}
++            Apply & Aktifkan
++          </button>
++        </div>
++      </div>
++
++      {/* List kode promo */}
++      <div className="text-[13px] font-bold text-text mb-2.5">Kode Referral Terdaftar</div>
++
++      {loading && (
++        <div className="text-center py-8 text-text-muted text-sm">
++          <i className="ti ti-loader-2 text-2xl block mb-2 animate-spin" />Memuat...
++        </div>
++      )}
++
++      {!loading && promoList.length === 0 && (
++        <div className="text-center py-10 text-text-muted">
++          <i className="ti ti-discount-off text-4xl block mb-2 opacity-40" />
++          <p className="text-sm font-medium">Belum ada kode referral</p>
++        </div>
++      )}
++
++      <div className="flex flex-col gap-2">
++        {promoList.map((p) => {
++          const st = statusPromo(p)
++          return (
++            <div key={p.id} className={`flex items-center gap-3 px-4 py-3 rounded-lg border shadow-sm ${
++              st === 'aktif' ? 'bg-bg border-border' : 'bg-red/5 border-red/20'
++            }`}>
++              <div className="flex-1 min-w-0">
++                <div className="flex items-center gap-2">
++                  <span className="font-mono font-bold text-[13px] text-text tracking-wide">{p.kode}</span>
++                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-2 text-text-muted font-medium">
++                    {p.tipe === 'baru' ? 'Murid Baru' : 'Murid Lama'}
++                  </span>
++                </div>
++                <div className="text-[12px] text-text-muted mt-0.5">
++                  Potongan {fmtRupiah(p.diskon_nominal)} · Dipakai {p.terpakai}/{p.kuota}
++                </div>
++              </div>
++              <span className={`text-[10px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${
++                st === 'aktif' ? 'bg-green/10 text-green' : st === 'habis' ? 'bg-red/10 text-red' : 'bg-bg-2 text-text-muted'
++              }`}>
++                {st === 'aktif' ? 'Aktif' : st === 'habis' ? 'Habis' : 'Nonaktif'}
++              </span>
++              {st === 'aktif' && (
++                <button onClick={() => matikan(p)}
++                  className="text-[11px] text-red font-medium px-2 py-1 rounded-md hover:bg-red/10 transition-all flex-shrink-0">
++                  Matikan
++                </button>
++              )}
++            </div>
++          )
++        })}
++      </div>
++    </div>
++  )
++}
+diff --git a/app/dashboard/slot/page.tsx b/app/dashboard/slot/page.tsx
+index 940b9c3..0a9b53b 100644
+--- a/app/dashboard/slot/page.tsx
++++ b/app/dashboard/slot/page.tsx
+@@ -1,6 +1,6 @@
+ 'use client'
+ import { useEffect, useState } from 'react'
+-import { getSlotDariJadwal, upsertSlotStatus, SlotInfo } from '@/lib/supabase'
++import { getSlotDariJadwal, setSlotPenuh, setSlotTersedia, setSlotKuota, SlotInfo } from '@/lib/supabase'
+ import { showToast } from '@/components/ui/Toast'
+ 
+ export default function SlotPage() {
+@@ -8,6 +8,7 @@ export default function SlotPage() {
+   const [loading, setLoading] = useState(true)
+   const [generatedLink, setGeneratedLink] = useState('')
+   const [toggling, setToggling] = useState<string | null>(null)
++  const [kuotaInput, setKuotaInput] = useState<Record<string, string>>({})
+ 
+   const load = async () => {
+     setLoading(true)
+@@ -18,26 +19,49 @@ export default function SlotPage() {
+ 
+   useEffect(() => { load() }, [])
+ 
++  const slotKey = (slot: SlotInfo) => `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
++
++  const updateLokal = (slot: SlotInfo, next: Partial<SlotInfo>) => {
++    setSlots(prev => prev.map(s =>
++      s.hari === slot.hari && s.jam_mulai === slot.jam_mulai && s.kolam === slot.kolam
++        ? { ...s, ...next } : s
++    ))
++  }
++
++  // Toggle tombol Tersedia ↔ Penuh
+   const toggleStatus = async (slot: SlotInfo) => {
+-    const key = `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
++    const key = slotKey(slot)
+     setToggling(key)
+-    const next = slot.status === 'tersedia' ? 'penuh' : 'tersedia'
+     try {
+-      await upsertSlotStatus(slot.hari, slot.jam_mulai, slot.kolam, next)
+-      setSlots(prev => prev.map(s =>
+-        s.hari === slot.hari && s.jam_mulai === slot.jam_mulai && s.kolam === slot.kolam
+-          ? { ...s, status: next } : s
+-      ))
+-      showToast(
+-        next === 'penuh'
+-          ? `${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Penuh`
+-          : `${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Tersedia`,
+-        'success'
+-      )
++      if (slot.status === 'tersedia') {
++        // Klik jadi Penuh → kuota otomatis 0
++        await setSlotPenuh(slot.hari, slot.jam_mulai, slot.kolam)
++        updateLokal(slot, { status: 'penuh', kuota: 0 })
++        showToast(`${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Penuh`, 'success')
++      } else {
++        // Klik jadi Tersedia → kuota default 1 (bisa diubah manual di angka kuota)
++        const kuotaBaru = 1
++        await setSlotTersedia(slot.hari, slot.jam_mulai, slot.kolam, kuotaBaru)
++        updateLokal(slot, { status: 'tersedia', kuota: kuotaBaru })
++        showToast(`${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Tersedia`, 'success')
++      }
+     } catch (e: any) { showToast('Gagal update: ' + e?.message, 'error') }
+     finally { setToggling(null) }
+   }
+ 
++  // Ubah angka kuota (dari tombol +/- atau ketik manual)
++  const ubahKuota = async (slot: SlotInfo, kuotaBaru: number) => {
++    const key = slotKey(slot)
++    const final = Math.max(0, kuotaBaru)
++    setToggling(key)
++    try {
++      await setSlotKuota(slot.hari, slot.jam_mulai, slot.kolam, final)
++      updateLokal(slot, { kuota: final, status: final > 0 ? 'tersedia' : 'penuh' })
++      setKuotaInput(prev => ({ ...prev, [key]: String(final) }))
++    } catch (e: any) { showToast('Gagal update kuota: ' + e?.message, 'error') }
++    finally { setToggling(null) }
++  }
++
+   const generateLink = () => {
+     const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
+     const link = `${appUrl}/daftar`
+@@ -116,32 +140,69 @@ export default function SlotPage() {
+           </div>
+           <div className="flex flex-col gap-2">
+             {kolamSlots.map((slot) => {
+-              const key = `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
++              const key = slotKey(slot)
+               const isToggling = toggling === key
++              const kuotaTampil = kuotaInput[key] ?? (slot.kuota ?? 0).toString()
+               return (
+-                <div key={key} className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-all shadow-sm ${
++                <div key={key} className={`flex flex-col gap-2.5 px-4 py-3 rounded-lg border transition-all shadow-sm ${
+                   slot.status === 'penuh' ? 'bg-red/5 border-red/20' : 'bg-bg border-border'
+                 }`}>
+-                  <div className="flex-1">
+-                    <div className="text-[13px] font-semibold text-text">{slot.hari}</div>
+-                    <div className="text-[12px] text-text-muted">{slot.jam_mulai} – {slot.jam_selesai}</div>
++                  <div className="flex items-center gap-3">
++                    <div className="flex-1">
++                      <div className="text-[13px] font-semibold text-text">{slot.hari}</div>
++                      <div className="text-[12px] text-text-muted">{slot.jam_mulai} – {slot.jam_selesai}</div>
++                    </div>
++                    <button
++                      onClick={() => toggleStatus(slot)}
++                      disabled={isToggling}
++                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all disabled:opacity-50 ${
++                        slot.status === 'tersedia'
++                          ? 'bg-green/10 border-green/30 text-green hover:bg-green hover:text-white'
++                          : 'bg-red/10 border-red/30 text-red hover:bg-red hover:text-white'
++                      }`}
++                    >
++                      {isToggling ? (
++                        <i className="ti ti-loader-2 animate-spin text-sm" />
++                      ) : (
++                        <i className={`ti ${slot.status === 'tersedia' ? 'ti-circle-check' : 'ti-circle-x'} text-sm`} />
++                      )}
++                      {slot.status === 'tersedia' ? 'Tersedia' : 'Penuh'}
++                    </button>
++                  </div>
++
++                  {/* Kontrol sisa kuota */}
++                  <div className="flex items-center gap-2 pt-2 border-t border-border/60">
++                    <span className="text-[11px] text-text-muted flex-shrink-0">Sisa kelas</span>
++                    <div className="flex items-center gap-1 ml-auto">
++                      <button
++                        onClick={() => ubahKuota(slot, (slot.kuota ?? 0) - 1)}
++                        disabled={isToggling || (slot.kuota ?? 0) <= 0}
++                        className="w-7 h-7 flex items-center justify-center rounded-md border border-border text-text-muted hover:bg-bg-2 disabled:opacity-30 transition-all"
++                      >
++                        <i className="ti ti-minus text-sm" />
++                      </button>
++                      <input
++                        type="number"
++                        min={0}
++                        value={kuotaTampil}
++                        onChange={(e) => setKuotaInput(prev => ({ ...prev, [key]: e.target.value }))}
++                        onBlur={(e) => {
++                          const v = parseInt(e.target.value)
++                          ubahKuota(slot, isNaN(v) ? 0 : v)
++                        }}
++                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
++                        className="w-14 text-center text-[13px] font-semibold text-text border border-border rounded-md py-1 focus:outline-none focus:border-blue"
++                      />
++                      <button
++                        onClick={() => ubahKuota(slot, (slot.kuota ?? 0) + 1)}
++                        disabled={isToggling}
++                        className="w-7 h-7 flex items-center justify-center rounded-md border border-border text-text-muted hover:bg-bg-2 disabled:opacity-30 transition-all"
++                      >
++                        <i className="ti ti-plus text-sm" />
++                      </button>
++                      <span className="text-[11px] text-text-muted ml-1">anak</span>
++                    </div>
+                   </div>
+-                  <button
+-                    onClick={() => toggleStatus(slot)}
+-                    disabled={isToggling}
+-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all disabled:opacity-50 ${
+-                      slot.status === 'tersedia'
+-                        ? 'bg-green/10 border-green/30 text-green hover:bg-green hover:text-white'
+-                        : 'bg-red/10 border-red/30 text-red hover:bg-red hover:text-white'
+-                    }`}
+-                  >
+-                    {isToggling ? (
+-                      <i className="ti ti-loader-2 animate-spin text-sm" />
+-                    ) : (
+-                      <i className={`ti ${slot.status === 'tersedia' ? 'ti-circle-check' : 'ti-circle-x'} text-sm`} />
+-                    )}
+-                    {slot.status === 'tersedia' ? 'Tersedia' : 'Penuh'}
+-                  </button>
+                 </div>
+               )
+             })}
+@@ -173,7 +234,11 @@ export default function SlotPage() {
+                 className={`flex items-center gap-2 text-[12px] py-0.5 ${s.status === 'penuh' ? 'opacity-40' : ''}`}>
+                 <i className={`ti ${s.status === 'tersedia' ? 'ti-circle-check text-green' : 'ti-circle-x text-red'} text-sm flex-shrink-0`} />
+                 <span className="text-text">{s.kolam} · {s.hari} {s.jam_mulai}–{s.jam_selesai}</span>
+-                {s.status === 'penuh' && <span className="text-[10px] text-red font-semibold ml-auto">Penuh</span>}
++                {s.status === 'penuh' ? (
++                  <span className="text-[10px] text-red font-semibold ml-auto">Penuh</span>
++                ) : s.kuota !== null && (
++                  <span className="text-[10px] text-green font-semibold ml-auto">Sisa {s.kuota}</span>
++                )}
+               </div>
+             ))}
+             {slots.length === 0 && <div className="text-[12px] text-text-muted">Belum ada slot</div>}
+diff --git a/lib/supabase.ts b/lib/supabase.ts
+index 64b60f0..2730c3b 100644
+--- a/lib/supabase.ts
++++ b/lib/supabase.ts
+@@ -343,6 +343,7 @@ export interface SlotInfo {
+   jam_selesai: string  // estimasi jam_mulai + 60 menit
+   kolam: string
+   status: 'tersedia' | 'penuh'
++  kuota: number | null  // sisa kuota anak, null = belum pernah diisi
+ }
+ 
+ // Ambil semua slot unik dari sesi, gabungkan dengan status dari slot_status
+@@ -358,8 +359,11 @@ export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
+     .from('slot_status')
+     .select('*')
+   const statusMap: Record<string, 'tersedia' | 'penuh'> = {}
++  const kuotaMap: Record<string, number | null> = {}
+   ;(statusData ?? []).forEach((s: any) => {
+-    statusMap[`${s.hari}__${s.jam_mulai}__${s.kolam}`] = s.status
++    const key = `${s.hari}__${s.jam_mulai}__${s.kolam}`
++    statusMap[key] = s.status
++    kuotaMap[key] = s.kuota ?? null
+   })
+ 
+   // Deduplikasi: ambil kombinasi unik hari+jam+kolam dari sesi
+@@ -383,6 +387,7 @@ export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
+         jam_selesai,
+         kolam: s.kolam,
+         status: statusMap[key] ?? 'tersedia',
++        kuota: kuotaMap[key] ?? null,
+       })
+     }
+   })
+@@ -399,14 +404,108 @@ export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
+   return slots
+ }
+ 
+-// Update status penuh/tersedia
+-export const upsertSlotStatus = async (hari: string, jam_mulai: string, kolam: string, status: 'tersedia' | 'penuh') => {
++// Klik tombol "Penuh" manual → status penuh, kuota otomatis 0
++export const setSlotPenuh = async (hari: string, jam_mulai: string, kolam: string) => {
+   const { error } = await supabase
+     .from('slot_status')
+-    .upsert({ hari, jam_mulai, kolam, status }, { onConflict: 'hari,jam_mulai,kolam' })
++    .upsert({ hari, jam_mulai, kolam, status: 'penuh', kuota: 0 }, { onConflict: 'hari,jam_mulai,kolam' })
++  if (error) throw error
++}
++
++// Klik tombol "Tersedia" manual (dari kondisi penuh) → status tersedia, kuota default 1 kalau belum ada
++export const setSlotTersedia = async (hari: string, jam_mulai: string, kolam: string, kuotaDefault = 1) => {
++  const { error } = await supabase
++    .from('slot_status')
++    .upsert({ hari, jam_mulai, kolam, status: 'tersedia', kuota: kuotaDefault }, { onConflict: 'hari,jam_mulai,kolam' })
++  if (error) throw error
++}
++
++// Ketik/atur angka sisa kuota manual → status mengikuti otomatis (0 = penuh, >0 = tersedia)
++export const setSlotKuota = async (hari: string, jam_mulai: string, kolam: string, kuota: number) => {
++  const kuotaFinal = Math.max(0, kuota)
++  const status = kuotaFinal > 0 ? 'tersedia' : 'penuh'
++  const { error } = await supabase
++    .from('slot_status')
++    .upsert({ hari, jam_mulai, kolam, status, kuota: kuotaFinal }, { onConflict: 'hari,jam_mulai,kolam' })
+   if (error) throw error
+ }
+ 
+ // Alias untuk kompatibilitas daftar publik
+ export const getJadwalSlot = getSlotDariJadwal
+-export type JadwalSlot = SlotInfo
+\ No newline at end of file
++export type JadwalSlot = SlotInfo
++
++// ── Promo / Kode Referral ─────────────────────────────────────
++
++export interface PromoInfo {
++  id: string
++  kode: string
++  tipe: 'baru' | 'lama'
++  diskon_nominal: number
++  kuota: number
++  terpakai: number
++  aktif: boolean
++  created_at: string
++}
++
++// Ambil semua kode promo (buat halaman admin)
++export const getAllPromo = async (): Promise<PromoInfo[]> => {
++  const { data, error } = await supabase
++    .from('promo')
++    .select('*')
++    .order('created_at', { ascending: false })
++  if (error) throw error
++  return data ?? []
++}
++
++// Buat kode promo baru
++export const createPromo = async (
++  kode: string,
++  tipe: 'baru' | 'lama',
++  diskon_nominal: number,
++  kuota: number
++) => {
++  const { error } = await supabase
++    .from('promo')
++    .insert({ kode: kode.trim().toUpperCase(), tipe, diskon_nominal, kuota, terpakai: 0, aktif: true })
++  if (error) throw error
++}
++
++// Nonaktifkan kode promo manual
++export const nonaktifkanPromo = async (id: string) => {
++  const { error } = await supabase.from('promo').update({ aktif: false }).eq('id', id)
++  if (error) throw error
++}
++
++// Cek apakah ada minimal 1 kode promo yang masih aktif (buat nampilin/nyembunyiin box kode di form daftar)
++export const adaPromoAktif = async (): Promise<boolean> => {
++  const { count, error } = await supabase
++    .from('promo')
++    .select('*', { count: 'exact', head: true })
++    .eq('aktif', true)
++  if (error) throw error
++  return (count ?? 0) > 0
++}
++
++// Validasi kode promo yang diketik orang tua di form daftar
++export const validasiPromo = async (kode: string): Promise<PromoInfo | null> => {
++  const { data, error } = await supabase
++    .from('promo')
++    .select('*')
++    .eq('kode', kode.trim().toUpperCase())
++    .eq('aktif', true)
++    .maybeSingle()
++  if (error) throw error
++  if (!data) return null
++  if (data.terpakai >= data.kuota) return null // kuota abis dianggap expired
++  return data
++}
++
++// Dipanggil setelah pendaftaran berhasil disubmit dengan kode promo valid
++export const pakaiPromo = async (id: string, terpakaiSekarang: number, kuota: number) => {
++  const terpakaiBaru = terpakaiSekarang + 1
++  const { error } = await supabase
++    .from('promo')
++    .update({ terpakai: terpakaiBaru, aktif: terpakaiBaru < kuota })
++    .eq('id', id)
++  if (error) throw error
++}
+\ No newline at end of file

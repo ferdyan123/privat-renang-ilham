@@ -343,6 +343,7 @@ export interface SlotInfo {
   jam_selesai: string  // estimasi jam_mulai + 60 menit
   kolam: string
   status: 'tersedia' | 'penuh'
+  kuota: number | null  // sisa kuota anak, null = belum pernah diisi
 }
 
 // Ambil semua slot unik dari sesi, gabungkan dengan status dari slot_status
@@ -358,8 +359,11 @@ export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
     .from('slot_status')
     .select('*')
   const statusMap: Record<string, 'tersedia' | 'penuh'> = {}
+  const kuotaMap: Record<string, number | null> = {}
   ;(statusData ?? []).forEach((s: any) => {
-    statusMap[`${s.hari}__${s.jam_mulai}__${s.kolam}`] = s.status
+    const key = `${s.hari}__${s.jam_mulai}__${s.kolam}`
+    statusMap[key] = s.status
+    kuotaMap[key] = s.kuota ?? null
   })
 
   // Deduplikasi: ambil kombinasi unik hari+jam+kolam dari sesi
@@ -383,6 +387,7 @@ export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
         jam_selesai,
         kolam: s.kolam,
         status: statusMap[key] ?? 'tersedia',
+        kuota: kuotaMap[key] ?? null,
       })
     }
   })
@@ -399,14 +404,108 @@ export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
   return slots
 }
 
-// Update status penuh/tersedia
-export const upsertSlotStatus = async (hari: string, jam_mulai: string, kolam: string, status: 'tersedia' | 'penuh') => {
+// Klik tombol "Penuh" manual → status penuh, kuota otomatis 0
+export const setSlotPenuh = async (hari: string, jam_mulai: string, kolam: string) => {
   const { error } = await supabase
     .from('slot_status')
-    .upsert({ hari, jam_mulai, kolam, status }, { onConflict: 'hari,jam_mulai,kolam' })
+    .upsert({ hari, jam_mulai, kolam, status: 'penuh', kuota: 0 }, { onConflict: 'hari,jam_mulai,kolam' })
+  if (error) throw error
+}
+
+// Klik tombol "Tersedia" manual (dari kondisi penuh) → status tersedia, kuota default 1 kalau belum ada
+export const setSlotTersedia = async (hari: string, jam_mulai: string, kolam: string, kuotaDefault = 1) => {
+  const { error } = await supabase
+    .from('slot_status')
+    .upsert({ hari, jam_mulai, kolam, status: 'tersedia', kuota: kuotaDefault }, { onConflict: 'hari,jam_mulai,kolam' })
+  if (error) throw error
+}
+
+// Ketik/atur angka sisa kuota manual → status mengikuti otomatis (0 = penuh, >0 = tersedia)
+export const setSlotKuota = async (hari: string, jam_mulai: string, kolam: string, kuota: number) => {
+  const kuotaFinal = Math.max(0, kuota)
+  const status = kuotaFinal > 0 ? 'tersedia' : 'penuh'
+  const { error } = await supabase
+    .from('slot_status')
+    .upsert({ hari, jam_mulai, kolam, status, kuota: kuotaFinal }, { onConflict: 'hari,jam_mulai,kolam' })
   if (error) throw error
 }
 
 // Alias untuk kompatibilitas daftar publik
 export const getJadwalSlot = getSlotDariJadwal
 export type JadwalSlot = SlotInfo
+
+// ── Promo / Kode Referral ─────────────────────────────────────
+
+export interface PromoInfo {
+  id: string
+  kode: string
+  tipe: 'baru' | 'lama'
+  diskon_nominal: number
+  kuota: number
+  terpakai: number
+  aktif: boolean
+  created_at: string
+}
+
+// Ambil semua kode promo (buat halaman admin)
+export const getAllPromo = async (): Promise<PromoInfo[]> => {
+  const { data, error } = await supabase
+    .from('promo')
+    .select('*')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
+// Buat kode promo baru
+export const createPromo = async (
+  kode: string,
+  tipe: 'baru' | 'lama',
+  diskon_nominal: number,
+  kuota: number
+) => {
+  const { error } = await supabase
+    .from('promo')
+    .insert({ kode: kode.trim().toUpperCase(), tipe, diskon_nominal, kuota, terpakai: 0, aktif: true })
+  if (error) throw error
+}
+
+// Nonaktifkan kode promo manual
+export const nonaktifkanPromo = async (id: string) => {
+  const { error } = await supabase.from('promo').update({ aktif: false }).eq('id', id)
+  if (error) throw error
+}
+
+// Cek apakah ada minimal 1 kode promo yang masih aktif (buat nampilin/nyembunyiin box kode di form daftar)
+export const adaPromoAktif = async (): Promise<boolean> => {
+  const { count, error } = await supabase
+    .from('promo')
+    .select('*', { count: 'exact', head: true })
+    .eq('aktif', true)
+  if (error) throw error
+  return (count ?? 0) > 0
+}
+
+// Validasi kode promo yang diketik orang tua di form daftar
+export const validasiPromo = async (kode: string): Promise<PromoInfo | null> => {
+  const { data, error } = await supabase
+    .from('promo')
+    .select('*')
+    .eq('kode', kode.trim().toUpperCase())
+    .eq('aktif', true)
+    .maybeSingle()
+  if (error) throw error
+  if (!data) return null
+  if (data.terpakai >= data.kuota) return null // kuota abis dianggap expired
+  return data
+}
+
+// Dipanggil setelah pendaftaran berhasil disubmit dengan kode promo valid
+export const pakaiPromo = async (id: string, terpakaiSekarang: number, kuota: number) => {
+  const terpakaiBaru = terpakaiSekarang + 1
+  const { error } = await supabase
+    .from('promo')
+    .update({ terpakai: terpakaiBaru, aktif: terpakaiBaru < kuota })
+    .eq('id', id)
+  if (error) throw error
+}

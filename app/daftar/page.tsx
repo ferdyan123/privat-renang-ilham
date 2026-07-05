@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { supabase, getJadwalSlot, JadwalSlot } from '@/lib/supabase'
+import { supabase, getJadwalSlot, JadwalSlot, adaPromoAktif, validasiPromo, pakaiPromo, PromoInfo } from '@/lib/supabase'
 import { HARGA_BASE, hitungHarga, fmtRupiah } from '@/lib/utils'
 import { ToastProvider, showToast } from '@/components/ui/Toast'
 
@@ -42,6 +42,13 @@ export default function DaftarPublikPage() {
   const [buktiFile, setBuktiFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
 
+  // Kode referral
+  const [showPromoBox, setShowPromoBox] = useState(false)
+  const [kodePromoInput, setKodePromoInput] = useState('')
+  const [promoValid, setPromoValid] = useState<PromoInfo | null>(null)
+  const [promoChecking, setPromoChecking] = useState(false)
+  const [promoError, setPromoError] = useState('')
+
   const [form, setForm] = useState({
     nama_murid: '', usia: '', jenis_kelamin: '', kategori: '',
     paket: '', jumlah_sesi: '4', jadwal_hari: '', jadwal_jam: '', catatan: '',
@@ -52,12 +59,34 @@ export default function DaftarPublikPage() {
 
   useEffect(() => {
     getJadwalSlot().then(setJadwalSlots).catch(() => {})
+    adaPromoAktif().then(setShowPromoBox).catch(() => {})
   }, [])
 
   // Hitung harga berdasarkan pilihan
   const hargaSekarang = form.paket && form.kategori
     ? hitungHarga(form.paket, form.kategori, parseInt(form.jumlah_sesi))
     : 0
+
+  const diskonAktif = promoValid ? Math.min(promoValid.diskon_nominal, hargaSekarang) : 0
+  const totalSetelahDiskon = Math.max(0, hargaSekarang - diskonAktif)
+
+  const cekKodePromo = async () => {
+    if (!kodePromoInput.trim()) return
+    setPromoChecking(true)
+    setPromoError('')
+    try {
+      const hasil = await validasiPromo(kodePromoInput)
+      if (!hasil) {
+        setPromoValid(null)
+        setPromoError('Kode tidak valid atau sudah habis')
+      } else {
+        setPromoValid(hasil)
+        showToast(`Kode ${hasil.kode} berhasil dipakai ✓`, 'success')
+      }
+    } catch (e: any) {
+      setPromoError('Gagal cek kode: ' + e?.message)
+    } finally { setPromoChecking(false) }
+  }
 
   const stepValid = () => {
     if (step === 0) return form.nama_murid.trim() && form.usia && form.jenis_kelamin && form.kategori && form.nama_ortu.trim() && form.wa_ortu.trim()
@@ -94,12 +123,20 @@ export default function DaftarPublikPage() {
         jadwal_hari: form.jadwal_hari,
         jadwal_jam: form.jadwal_jam,
         bukti_tf_url,
-        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Sesi: ${form.jumlah_sesi}x | Harga: ${fmtRupiah(hargaSekarang)}${form.catatan ? ' | ' + form.catatan : ''}`,
+        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Sesi: ${form.jumlah_sesi}x | Harga: ${fmtRupiah(hargaSekarang)}${promoValid ? ` | Promo: ${promoValid.kode} (-${fmtRupiah(diskonAktif)})` : ''}${form.catatan ? ' | ' + form.catatan : ''}`,
         jumlah_sesi: parseInt(form.jumlah_sesi),
-        harga: hargaSekarang,
+        harga: totalSetelahDiskon,
+        kode_promo: promoValid?.kode ?? null,
+        diskon: diskonAktif,
         status: 'menunggu',
       })
       if (error) throw error
+
+      // Tandai kode promo sudah kepakai (kuota abis → otomatis nonaktif)
+      if (promoValid) {
+        try { await pakaiPromo(promoValid.id, promoValid.terpakai, promoValid.kuota) } catch {}
+      }
+
       setDone(true)
     } catch (e: any) {
       showToast(e?.message || 'Gagal mendaftar', 'error')
@@ -358,9 +395,19 @@ export default function DaftarPublikPage() {
                                   Kelas Penuh
                                 </span>
                               ) : isSelected ? (
-                                <i className="ti ti-check text-[#185FA5] text-base" />
+                                <div className="flex items-center gap-1.5">
+                                  {s.kuota !== null && (
+                                    <span className="text-[10px] text-gray-400">Sisa {s.kuota}</span>
+                                  )}
+                                  <i className="ti ti-check text-[#185FA5] text-base" />
+                                </div>
                               ) : (
-                                <span className="text-[10px] text-green-500 font-semibold">Tersedia</span>
+                                <div className="text-right">
+                                  <span className="text-[10px] text-green-500 font-semibold block">Tersedia</span>
+                                  {s.kuota !== null && (
+                                    <span className="text-[9px] text-gray-400">Sisa {s.kuota} anak</span>
+                                  )}
+                                </div>
                               )}
                             </button>
                           )
@@ -390,6 +437,43 @@ export default function DaftarPublikPage() {
               <div className="text-[14px] font-bold text-gray-800 flex items-center gap-2 pb-1 border-b border-gray-100">
                 💳 Pembayaran
               </div>
+              {/* Kode Referral — cuma muncul kalau ada kode promo aktif */}
+              {showPromoBox && (
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">
+                    Kode Referral <span className="normal-case text-gray-300">(opsional)</span>
+                  </label>
+                  {promoValid ? (
+                    <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-3.5 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <i className="ti ti-circle-check text-green-500 text-base" />
+                        <div>
+                          <div className="text-[12px] font-bold text-green-700">{promoValid.kode}</div>
+                          <div className="text-[11px] text-green-600">Potongan {fmtRupiah(diskonAktif)}</div>
+                        </div>
+                      </div>
+                      <button onClick={() => { setPromoValid(null); setKodePromoInput(''); setPromoError('') }}
+                        className="text-[11px] text-gray-400 font-medium">× Hapus</button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex gap-2">
+                        <input
+                          value={kodePromoInput}
+                          onChange={(e) => { setKodePromoInput(e.target.value.toUpperCase()); setPromoError('') }}
+                          placeholder="Contoh: IBU2026"
+                          className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] font-mono font-semibold tracking-wide text-gray-800 focus:outline-none focus:border-[#185FA5]"
+                        />
+                        <button onClick={cekKodePromo} disabled={promoChecking || !kodePromoInput.trim()}
+                          className="px-4 rounded-xl bg-[#185FA5] text-white text-[12px] font-semibold disabled:opacity-40">
+                          {promoChecking ? <i className="ti ti-loader-2 animate-spin text-base" /> : 'Pakai'}
+                        </button>
+                      </div>
+                      {promoError && <div className="text-[11px] text-red-400 mt-1">{promoError}</div>}
+                    </>
+                  )}
+                </div>
+              )}
               {/* Ringkasan */}
               <div className="bg-[#E6F4FB] rounded-xl p-3.5">
                 <div className="text-[11px] font-semibold text-[#185FA5] uppercase tracking-wide mb-2">Ringkasan</div>
@@ -400,11 +484,15 @@ export default function DaftarPublikPage() {
                     ['Sesi', form.jumlah_sesi + 'x/bulan'],
                     ['Kategori', form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'],
                     ['Jadwal', `${form.jadwal_hari} · ${form.jadwal_jam}`],
-                    ['Total Biaya', hargaSekarang > 0 ? fmtRupiah(hargaSekarang) : '-'],
+                    ...(promoValid ? [
+                      ['Subtotal', hargaSekarang > 0 ? fmtRupiah(hargaSekarang) : '-'],
+                      ['Diskon', `- ${fmtRupiah(diskonAktif)}`],
+                    ] : []),
+                    ['Total Biaya', totalSetelahDiskon > 0 ? fmtRupiah(totalSetelahDiskon) : (hargaSekarang > 0 ? fmtRupiah(hargaSekarang) : '-')],
                   ].map(([k,v]) => (
                     <div key={k} className="flex justify-between">
                       <span className="text-gray-400">{k}</span>
-                      <strong className="text-gray-800 text-right max-w-[200px]">{v}</strong>
+                      <strong className={`text-right max-w-[200px] ${k === 'Total Biaya' ? 'text-[#185FA5]' : k === 'Diskon' ? 'text-green-600' : 'text-gray-800'}`}>{v}</strong>
                     </div>
                   ))}
                 </div>

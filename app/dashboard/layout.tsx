@@ -16,6 +16,7 @@ const NAV = [
   { tab: 'kirim',      href: '/dashboard/kirim',     icon: 'ti-send',           label: 'Kirim' },
   { tab: 'daftar',     href: '/dashboard/daftar',    icon: 'ti-user-plus',      label: 'Daftar', badge: true },
   { tab: 'slot',       href: '/dashboard/slot',     icon: 'ti-calendar-event',  label: 'Slot' },
+  { tab: 'promo',      href: '/dashboard/promo',    icon: 'ti-discount-2',      label: 'Promo' },
 ]
 
 // Menu utama yang selalu keliatan di nav mobile (biar nggak sesak/berdempetan)

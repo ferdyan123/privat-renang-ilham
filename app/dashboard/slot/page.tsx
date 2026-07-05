@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getSlotDariJadwal, upsertSlotStatus, SlotInfo } from '@/lib/supabase'
+import { getSlotDariJadwal, setSlotPenuh, setSlotTersedia, setSlotKuota, SlotInfo } from '@/lib/supabase'
 import { showToast } from '@/components/ui/Toast'
 
 export default function SlotPage() {
@@ -8,6 +8,7 @@ export default function SlotPage() {
   const [loading, setLoading] = useState(true)
   const [generatedLink, setGeneratedLink] = useState('')
   const [toggling, setToggling] = useState<string | null>(null)
+  const [kuotaInput, setKuotaInput] = useState<Record<string, string>>({})
 
   const load = async () => {
     setLoading(true)
@@ -18,23 +19,46 @@ export default function SlotPage() {
 
   useEffect(() => { load() }, [])
 
+  const slotKey = (slot: SlotInfo) => `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
+
+  const updateLokal = (slot: SlotInfo, next: Partial<SlotInfo>) => {
+    setSlots(prev => prev.map(s =>
+      s.hari === slot.hari && s.jam_mulai === slot.jam_mulai && s.kolam === slot.kolam
+        ? { ...s, ...next } : s
+    ))
+  }
+
+  // Toggle tombol Tersedia ↔ Penuh
   const toggleStatus = async (slot: SlotInfo) => {
-    const key = `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
+    const key = slotKey(slot)
     setToggling(key)
-    const next = slot.status === 'tersedia' ? 'penuh' : 'tersedia'
     try {
-      await upsertSlotStatus(slot.hari, slot.jam_mulai, slot.kolam, next)
-      setSlots(prev => prev.map(s =>
-        s.hari === slot.hari && s.jam_mulai === slot.jam_mulai && s.kolam === slot.kolam
-          ? { ...s, status: next } : s
-      ))
-      showToast(
-        next === 'penuh'
-          ? `${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Penuh`
-          : `${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Tersedia`,
-        'success'
-      )
+      if (slot.status === 'tersedia') {
+        // Klik jadi Penuh → kuota otomatis 0
+        await setSlotPenuh(slot.hari, slot.jam_mulai, slot.kolam)
+        updateLokal(slot, { status: 'penuh', kuota: 0 })
+        showToast(`${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Penuh`, 'success')
+      } else {
+        // Klik jadi Tersedia → kuota default 1 (bisa diubah manual di angka kuota)
+        const kuotaBaru = 1
+        await setSlotTersedia(slot.hari, slot.jam_mulai, slot.kolam, kuotaBaru)
+        updateLokal(slot, { status: 'tersedia', kuota: kuotaBaru })
+        showToast(`${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Tersedia`, 'success')
+      }
     } catch (e: any) { showToast('Gagal update: ' + e?.message, 'error') }
+    finally { setToggling(null) }
+  }
+
+  // Ubah angka kuota (dari tombol +/- atau ketik manual)
+  const ubahKuota = async (slot: SlotInfo, kuotaBaru: number) => {
+    const key = slotKey(slot)
+    const final = Math.max(0, kuotaBaru)
+    setToggling(key)
+    try {
+      await setSlotKuota(slot.hari, slot.jam_mulai, slot.kolam, final)
+      updateLokal(slot, { kuota: final, status: final > 0 ? 'tersedia' : 'penuh' })
+      setKuotaInput(prev => ({ ...prev, [key]: String(final) }))
+    } catch (e: any) { showToast('Gagal update kuota: ' + e?.message, 'error') }
     finally { setToggling(null) }
   }
 
@@ -116,32 +140,69 @@ export default function SlotPage() {
           </div>
           <div className="flex flex-col gap-2">
             {kolamSlots.map((slot) => {
-              const key = `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
+              const key = slotKey(slot)
               const isToggling = toggling === key
+              const kuotaTampil = kuotaInput[key] ?? (slot.kuota ?? 0).toString()
               return (
-                <div key={key} className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-all shadow-sm ${
+                <div key={key} className={`flex flex-col gap-2.5 px-4 py-3 rounded-lg border transition-all shadow-sm ${
                   slot.status === 'penuh' ? 'bg-red/5 border-red/20' : 'bg-bg border-border'
                 }`}>
-                  <div className="flex-1">
-                    <div className="text-[13px] font-semibold text-text">{slot.hari}</div>
-                    <div className="text-[12px] text-text-muted">{slot.jam_mulai} – {slot.jam_selesai}</div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <div className="text-[13px] font-semibold text-text">{slot.hari}</div>
+                      <div className="text-[12px] text-text-muted">{slot.jam_mulai} – {slot.jam_selesai}</div>
+                    </div>
+                    <button
+                      onClick={() => toggleStatus(slot)}
+                      disabled={isToggling}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all disabled:opacity-50 ${
+                        slot.status === 'tersedia'
+                          ? 'bg-green/10 border-green/30 text-green hover:bg-green hover:text-white'
+                          : 'bg-red/10 border-red/30 text-red hover:bg-red hover:text-white'
+                      }`}
+                    >
+                      {isToggling ? (
+                        <i className="ti ti-loader-2 animate-spin text-sm" />
+                      ) : (
+                        <i className={`ti ${slot.status === 'tersedia' ? 'ti-circle-check' : 'ti-circle-x'} text-sm`} />
+                      )}
+                      {slot.status === 'tersedia' ? 'Tersedia' : 'Penuh'}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => toggleStatus(slot)}
-                    disabled={isToggling}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all disabled:opacity-50 ${
-                      slot.status === 'tersedia'
-                        ? 'bg-green/10 border-green/30 text-green hover:bg-green hover:text-white'
-                        : 'bg-red/10 border-red/30 text-red hover:bg-red hover:text-white'
-                    }`}
-                  >
-                    {isToggling ? (
-                      <i className="ti ti-loader-2 animate-spin text-sm" />
-                    ) : (
-                      <i className={`ti ${slot.status === 'tersedia' ? 'ti-circle-check' : 'ti-circle-x'} text-sm`} />
-                    )}
-                    {slot.status === 'tersedia' ? 'Tersedia' : 'Penuh'}
-                  </button>
+
+                  {/* Kontrol sisa kuota */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-border/60">
+                    <span className="text-[11px] text-text-muted flex-shrink-0">Sisa kelas</span>
+                    <div className="flex items-center gap-1 ml-auto">
+                      <button
+                        onClick={() => ubahKuota(slot, (slot.kuota ?? 0) - 1)}
+                        disabled={isToggling || (slot.kuota ?? 0) <= 0}
+                        className="w-7 h-7 flex items-center justify-center rounded-md border border-border text-text-muted hover:bg-bg-2 disabled:opacity-30 transition-all"
+                      >
+                        <i className="ti ti-minus text-sm" />
+                      </button>
+                      <input
+                        type="number"
+                        min={0}
+                        value={kuotaTampil}
+                        onChange={(e) => setKuotaInput(prev => ({ ...prev, [key]: e.target.value }))}
+                        onBlur={(e) => {
+                          const v = parseInt(e.target.value)
+                          ubahKuota(slot, isNaN(v) ? 0 : v)
+                        }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                        className="w-14 text-center text-[13px] font-semibold text-text border border-border rounded-md py-1 focus:outline-none focus:border-blue"
+                      />
+                      <button
+                        onClick={() => ubahKuota(slot, (slot.kuota ?? 0) + 1)}
+                        disabled={isToggling}
+                        className="w-7 h-7 flex items-center justify-center rounded-md border border-border text-text-muted hover:bg-bg-2 disabled:opacity-30 transition-all"
+                      >
+                        <i className="ti ti-plus text-sm" />
+                      </button>
+                      <span className="text-[11px] text-text-muted ml-1">anak</span>
+                    </div>
+                  </div>
                 </div>
               )
             })}
@@ -173,7 +234,11 @@ export default function SlotPage() {
                 className={`flex items-center gap-2 text-[12px] py-0.5 ${s.status === 'penuh' ? 'opacity-40' : ''}`}>
                 <i className={`ti ${s.status === 'tersedia' ? 'ti-circle-check text-green' : 'ti-circle-x text-red'} text-sm flex-shrink-0`} />
                 <span className="text-text">{s.kolam} · {s.hari} {s.jam_mulai}–{s.jam_selesai}</span>
-                {s.status === 'penuh' && <span className="text-[10px] text-red font-semibold ml-auto">Penuh</span>}
+                {s.status === 'penuh' ? (
+                  <span className="text-[10px] text-red font-semibold ml-auto">Penuh</span>
+                ) : s.kuota !== null && (
+                  <span className="text-[10px] text-green font-semibold ml-auto">Sisa {s.kuota}</span>
+                )}
               </div>
             ))}
             {slots.length === 0 && <div className="text-[12px] text-text-muted">Belum ada slot</div>}
