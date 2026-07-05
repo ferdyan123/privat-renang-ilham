@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
-import { getSesiByTanggal, getMurid, getAbsensi, upsertAbsensiBatch, addSesi, getMuridSiapTagih, Sesi, Murid, Absensi } from '@/lib/supabase'
+import { getSesiByTanggal, getMurid, getAbsensi, upsertAbsensiBatch, addSesi, getMuridSiapTagih, getSlotDariJadwal, Sesi, Murid, Absensi } from '@/lib/supabase'
 import { sendLocalNotif } from '@/components/ui/NotificationSetup'
 import { fmtTgl, todayStr, KOLAM_PRESETS, jamSelesai } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
@@ -9,6 +9,7 @@ import Avatar from '@/components/ui/Avatar'
 
 export default function HariIniPage() {
   const today = todayStr()
+  const HARI_ID = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu']
   const [selectedDate, setSelectedDate] = useState(today)
   const dateInputRef = useRef<HTMLInputElement>(null)
   const [sesiList, setSesiList] = useState<Sesi[]>([])
@@ -32,11 +33,39 @@ export default function HariIniPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [sesi, murid] = await Promise.all([getSesiByTanggal(selectedDate), getMurid()])
+      const [sesiReal, murid] = await Promise.all([getSesiByTanggal(selectedDate), getMurid()])
+      let sesi = [...sesiReal]
+
+      // Kalau ada pola jadwal mingguan (dari sesi yang pernah dibuat sebelumnya) yang
+      // cocok sama hari ini tapi belum ada sesi ASLI di tanggal spesifik ini, tampilkan
+      // sebagai "sesi virtual" — nanti baru dibikin beneran pas absensinya disimpan.
+      try {
+        const slots = await getSlotDariJadwal()
+        const hariIni = HARI_ID[new Date(selectedDate + 'T00:00:00').getDay()]
+        const slotHariIni = slots.filter((sl) => sl.hari === hariIni)
+        slotHariIni.forEach((sl) => {
+          const [jam, menit] = sl.jam_mulai.split(':')
+          const sudahAda = sesi.some((s) => s.jam === jam && s.menit === menit && s.kolam === sl.kolam)
+          if (!sudahAda) {
+            const [jm, mm] = sl.jam_mulai.split(':').map(Number)
+            const [js, ms] = sl.jam_selesai.split(':').map(Number)
+            const durasi = (js * 60 + ms) - (jm * 60 + mm)
+            sesi.push({
+              id: `virtual::${sl.hari}::${sl.jam_mulai}::${sl.kolam}`,
+              tanggal: selectedDate,
+              jam, menit,
+              durasi: durasi > 0 ? durasi : 60,
+              kolam: sl.kolam,
+            })
+          }
+        })
+        sesi.sort((a, b) => `${a.jam}${a.menit}`.localeCompare(`${b.jam}${b.menit}`))
+      } catch { /* kalau gagal ambil pola jadwal, tetap tampilkan sesi asli aja */ }
+
       setSesiList(sesi)
       setMuridList(murid)
       const map: Record<string, Record<string, Absensi['status']>> = {}
-      await Promise.all(sesi.map(async (s) => {
+      await Promise.all(sesi.filter((s) => !s.id.startsWith('virtual::')).map(async (s) => {
         const abs = await getAbsensi(s.id)
         map[s.id] = {}
         abs.forEach((a) => { map[s.id][a.murid_id] = a.status })
@@ -70,14 +99,31 @@ export default function HariIniPage() {
     setSavingSesi(sesiId)
     try {
       const sesi = sesiList.find((s) => s.id === sesiId)
-      const relevantMurid = sesi ? muridUntukSesi(sesi) : muridList
+      if (!sesi) return
+      const relevantMurid = muridUntukSesi(sesi)
+
+      // Kalau ini sesi virtual (belum pernah dibuat beneran di tanggal ini),
+      // bikin dulu sesi aslinya sebelum nyimpen absensi.
+      let realSesiId = sesiId
+      if (sesiId.startsWith('virtual::')) {
+        const newSesi = await addSesi({
+          tanggal: sesi.tanggal,
+          jam: sesi.jam,
+          menit: sesi.menit,
+          durasi: sesi.durasi,
+          kolam: sesi.kolam,
+        })
+        realSesiId = newSesi.id
+      }
+
       const records = relevantMurid.map((m) => ({
-        sesi_id: sesiId,
+        sesi_id: realSesiId,
         murid_id: m.id,
         status: absenMap[sesiId]?.[m.id] ?? 'alpha',
       }))
       await upsertAbsensiBatch(records)
       showToast('Absensi disimpan ✓', 'success')
+      load()
       // Cek otomatis murid yang sudah siap tagih
       getMuridSiapTagih().then((list) => {
         setSiapTagihList(list)
@@ -115,7 +161,6 @@ export default function HariIniPage() {
     murids.filter((m) => absenMap[sesiId]?.[m.id] === 'hadir').length
 
   // Cuma murid yang jadwal tetapnya (hari+jam+kolam) cocok sama sesi ini
-  const HARI_ID = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu']
   const muridUntukSesi = (s: Sesi) => {
     const hari = HARI_ID[new Date(s.tanggal + 'T00:00:00').getDay()]
     const jamMulai = `${s.jam}:${s.menit}`
@@ -232,7 +277,12 @@ export default function HariIniPage() {
           <div key={s.id} className="bg-bg border border-border rounded-lg mb-3 overflow-hidden shadow-sm">
             <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
               <div>
-                <div className="text-[14px] font-semibold text-text">{s.jam}:{s.menit} – {jamSelesai(s.jam, s.menit, s.durasi)}</div>
+                <div className="text-[14px] font-semibold text-text flex items-center gap-1.5">
+                  {s.jam}:{s.menit} – {jamSelesai(s.jam, s.menit, s.durasi)}
+                  {s.id.startsWith('virtual::') && (
+                    <span className="text-[9px] font-medium bg-yellow/10 text-yellow px-1.5 py-0.5 rounded-full">Belum disimpan</span>
+                  )}
+                </div>
                 <div className="text-[12px] text-text-muted">{s.kolam} · {s.durasi} menit</div>
               </div>
               <div className="ml-auto flex items-center gap-3">
