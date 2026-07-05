@@ -159,9 +159,7 @@ export default function DaftarPublikPage() {
         {/* Logo + stepper dalam satu baris */}
         <div className="absolute inset-0 flex items-center px-5 gap-4">
           <div className="flex items-center gap-2.5 flex-shrink-0">
-            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-              <i className="ti ti-ripple text-white text-lg" />
-            </div>
+            <img src="/icon-192.png" alt="Logo" className="w-8 h-8 rounded-lg flex-shrink-0 object-cover" />
             <div>
               <div className="text-white text-[13px] font-bold leading-tight">Privat Renang Ilham</div>
               <div className="text-white/60 text-[10px]">Pendaftaran Les Renang</div>

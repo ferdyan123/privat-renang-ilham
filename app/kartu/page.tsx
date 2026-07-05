@@ -278,9 +278,7 @@ function KartuContent() {
         `}</style>
 
         <div className="absolute inset-0 flex items-center px-5 gap-3">
-          <div className="w-9 h-9 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-            <i className="ti ti-ripple text-white text-xl" />
-          </div>
+          <img src="/icon-192.png" alt="Logo" className="w-9 h-9 rounded-lg flex-shrink-0 object-cover" />
           <div>
             <div className="text-white text-[15px] font-bold">Privat Renang Ilham</div>
             <div className="text-white/70 text-[11px]">Kartu Kehadiran · Siklus #{data.siklus}</div>

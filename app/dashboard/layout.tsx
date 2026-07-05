@@ -74,9 +74,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* ── SIDEBAR desktop ── */}
       <aside className="hidden lg:flex flex-col w-[220px] min-h-screen bg-bg border-r border-border fixed top-0 left-0 z-30 py-5">
         <div className="flex items-center gap-[10px] px-5 pb-5 border-b border-border mb-3">
-          <div className="w-[34px] h-[34px] bg-[#185FA5] rounded-md flex items-center justify-center flex-shrink-0">
-            <i className="ti ti-ripple text-white text-xl" />
-          </div>
+          <img src="/icon-192.png" alt="Logo" className="w-[34px] h-[34px] rounded-md flex-shrink-0 object-cover" />
           <span className="text-base font-semibold text-text">Privat Renang Ilham</span>
         </div>
         <div className="text-[11px] text-text-muted px-5 mb-2">{nowFull}</div>
@@ -113,9 +111,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="flex-1 lg:ml-[220px] bg-bg min-h-screen flex flex-col">
         {/* Mobile topbar */}
         <div className="lg:hidden sticky top-0 z-20 bg-bg border-b border-border px-4 py-3 flex items-center gap-[10px]">
-          <div className="w-8 h-8 bg-[#185FA5] rounded-md flex items-center justify-center flex-shrink-0">
-            <i className="ti ti-ripple text-white text-[18px]" />
-          </div>
+          <img src="/icon-192.png" alt="Logo" className="w-8 h-8 rounded-md flex-shrink-0 object-cover" />
           <span className="text-base font-semibold text-text">Privat Renang Ilham</span>
           <span className="text-[12px] text-text-muted ml-auto mr-1">{nowFmt}</span>
           <button onClick={handleLogout} className="w-8 h-8 flex items-center justify-center rounded-full text-red hover:bg-red/5 transition-all flex-shrink-0">

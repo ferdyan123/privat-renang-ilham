@@ -45,9 +45,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-[#E6F4FB] p-4">
       <div className="bg-white rounded-xl shadow-sm p-6 w-full max-w-[360px]">
         <div className="flex items-center gap-2 mb-6 justify-center">
-          <div className="w-9 h-9 bg-[#185FA5] rounded-md flex items-center justify-center flex-shrink-0">
-            <i className="ti ti-ripple text-white text-xl" />
-          </div>
+          <img src="/icon-192.png" alt="Logo" className="w-9 h-9 rounded-md flex-shrink-0 object-cover" />
           <span className="text-[16px] font-semibold text-text">Privat Renang Ilham</span>
         </div>
 
