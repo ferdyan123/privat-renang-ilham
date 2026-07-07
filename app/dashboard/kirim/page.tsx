@@ -2,17 +2,9 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { getMurid, getSesi, createTagihan, getSiklusBerjalan, Murid, Sesi } from '@/lib/supabase'
-import { fmtShort, fmtRupiah } from '@/lib/utils'
+import { fmtShort, fmtRupiah, getRekeningByPemilik } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Avatar from '@/components/ui/Avatar'
-
-// ── Info pembayaran — edit di sini ──────────────────────────
-const REKENING = {
-  nama: 'Muhammad Nurilham Aulia Rahman',
-  bank: 'Sea Bank',
-  nomor: '901452432623',
-}
-// ────────────────────────────────────────────────────────────
 
 interface SiklusInfo {
   sesiHadir: string[]
@@ -92,6 +84,7 @@ function KirimPageContent() {
   }
 
   const murid = muridList.find((m) => m.id === selectedMurid)
+  const REKENING = getRekeningByPemilik(murid?.pemilik)
 
   // Format jadwal dari sesi: ambil sesi pertama sebagai referensi jadwal tetap
   const jadwalLabel = siklus?.sesiDetail[0]
@@ -213,6 +206,11 @@ _Terima kasih! 💙_`
                 <div className="text-[11px] text-text-muted">{m.paket}</div>
               </div>
               {m.kategori === 'abk' && <span className="text-[10px] bg-yellow/10 text-yellow px-1.5 py-0.5 rounded-full">ABK</span>}
+              {m.pemilik && m.pemilik !== 'Ilham' && (
+                <span className="text-[10px] bg-blue-light text-blue px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                  <i className="ti ti-building-bank text-[10px]" />{m.pemilik}
+                </span>
+              )}
               {selectedMurid === m.id && <i className="ti ti-check text-blue" />}
             </button>
           ))}

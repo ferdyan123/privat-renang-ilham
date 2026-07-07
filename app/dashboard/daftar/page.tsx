@@ -62,6 +62,7 @@ export default function DaftarPage() {
         jadwal_kolam: kolam,
         harga: d.harga ?? 0,
         jumlah_sesi: d.jumlah_sesi ?? 4,
+        pemilik: d.pemilik || 'Ilham',
       })
       showToast(`${d.nama_murid} diterima ✓`, 'success')
       loadPendaftaran()

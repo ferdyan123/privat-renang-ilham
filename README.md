@@ -103,6 +103,11 @@ CREATE TABLE IF NOT EXISTS promo (
   aktif boolean not null default true,
   created_at timestamptz default now()
 );
+
+-- Kolom pemilik (Ilham / Ibun / custom) di murid & pending_members —
+-- nentuin rekening penagihan yang dipakai buat murid tersebut.
+ALTER TABLE murid ADD COLUMN IF NOT EXISTS pemilik text DEFAULT 'Ilham';
+ALTER TABLE pending_members ADD COLUMN IF NOT EXISTS pemilik text DEFAULT 'Ilham';
 ```
 
 ### 4. Buat Supabase Storage bucket

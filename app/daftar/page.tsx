@@ -1,14 +1,9 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { supabase, getJadwalSlot, JadwalSlot, adaPromoAktif, validasiPromo, pakaiPromo, PromoInfo } from '@/lib/supabase'
-import { HARGA_BASE, hitungHarga, fmtRupiah } from '@/lib/utils'
+import { HARGA_BASE, hitungHarga, fmtRupiah, getRekeningByPemilik } from '@/lib/utils'
 import { ToastProvider, showToast } from '@/components/ui/Toast'
-
-const REKENING = {
-  nama: 'Muhammad Nurilham Aulia Rahman',
-  bank: 'Sea Bank',
-  nomor: '901452432623',
-}
 
 const KELAS_LIST = [
   { id: 'semi_privat', label: 'Semi Privat', desc: 'Belajar bersama 2-3 anak seusia' },
@@ -35,6 +30,20 @@ const ILUSTRASI = [
 ]
 
 export default function DaftarPublikPage() {
+  return (
+    <Suspense fallback={null}>
+      <DaftarPublikPageContent />
+    </Suspense>
+  )
+}
+
+function DaftarPublikPageContent() {
+  const searchParams = useSearchParams()
+  // Pemilik rekening tujuan — dibawa dari link yang di-generate di halaman Slot.
+  // Default 'Ilham' kalau link lama/tanpa param.
+  const pemilik = searchParams.get('pemilik') || 'Ilham'
+  const REKENING = getRekeningByPemilik(pemilik)
+
   const [step, setStep] = useState(0)
   const [done, setDone] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -129,6 +138,7 @@ export default function DaftarPublikPage() {
         kode_promo: promoValid?.kode ?? null,
         diskon: diskonAktif,
         status: 'menunggu',
+        pemilik,
       })
       if (error) throw error
 

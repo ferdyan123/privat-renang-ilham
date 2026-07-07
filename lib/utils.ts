@@ -72,3 +72,29 @@ export const KATEGORI_LIST = [
   { value: 'normal', label: 'Anak Normal' },
   { value: 'abk', label: 'Anak Berkebutuhan Khusus (ABK)' },
 ]
+
+// ── Pemilik / rekening tujuan (sistem multi-rekening) ────────────────────
+// Dipilih di halaman Slot saat generate link pendaftaran, ikut tersimpan
+// di pending_members & murid, lalu dipakai lagi di halaman Kirim buat
+// nentuin rekening mana yang ditampilkan ke orang tua.
+export interface RekeningInfo { nama: string; bank: string; nomor: string }
+
+export const REKENING_ILHAM: RekeningInfo = {
+  nama: 'Muhammad Nurilham Aulia Rahman',
+  bank: 'Sea Bank',
+  nomor: '901452432623',
+}
+
+export const REKENING_IBUN: RekeningInfo = {
+  nama: 'Ida Farida',
+  bank: 'Sea Bank',
+  nomor: '901975466695',
+}
+
+// Pilihan tetap di selector (Ilham & Ibun) — di luar ini dianggap "custom"
+export const PEMILIK_TETAP = ['Ilham', 'Ibun']
+
+// Nama custom (misal "Ferdy") pakai rekening yang sama kaya Ilham — cuma
+// beda tag pelacakan, bukan beda rekening.
+export const getRekeningByPemilik = (pemilik?: string | null): RekeningInfo =>
+  pemilik === 'Ibun' ? REKENING_IBUN : REKENING_ILHAM

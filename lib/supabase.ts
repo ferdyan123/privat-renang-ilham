@@ -19,6 +19,7 @@ export interface Murid {
   harga: number
   jumlah_sesi: number
   aktif: boolean
+  pemilik: string
 }
 
 export interface Sesi {
@@ -52,6 +53,7 @@ export interface PendingMember {
   catatan: string | null
   status: 'menunggu' | 'diterima' | 'ditolak'
   created_at: string
+  pemilik: string | null
 }
 
 // ── DB helpers ─────────────────────────────────────────────────────────────
@@ -79,6 +81,19 @@ export const addMurid = async (payload: Omit<Murid, 'id' | 'aktif'>): Promise<Mu
 export const deleteMurid = async (id: string) => {
   const { error } = await supabase.from('murid').update({ aktif: false }).eq('id', id)
   if (error) throw error
+}
+
+// Ambil daftar nama "pemilik" custom yang pernah dipakai (di luar Ilham/Ibun)
+// dari data murid yang sudah ada — buat suggestion di dropdown, biar nama
+// kaya "Ferdy" yang pernah kepake gak perlu diketik ulang.
+export const getPemilikSuggestions = async (): Promise<string[]> => {
+  const { data, error } = await supabase.from('murid').select('pemilik')
+  if (error) throw error
+  const set = new Set<string>()
+  ;(data ?? []).forEach((r: any) => {
+    if (r.pemilik && r.pemilik !== 'Ilham' && r.pemilik !== 'Ibun') set.add(r.pemilik)
+  })
+  return Array.from(set).sort()
 }
 
 export const getSesi = async (limit = 90): Promise<Sesi[]> => {

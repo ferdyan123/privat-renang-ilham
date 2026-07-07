@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, Murid, JadwalSlot } from '@/lib/supabase'
-import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, HARGA_BASE, hitungHarga, fmtRupiah, formatRibuan, parseRibuan } from '@/lib/utils'
+import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, Murid, JadwalSlot } from '@/lib/supabase'
+import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, HARGA_BASE, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
 import Avatar from '@/components/ui/Avatar'
@@ -17,6 +17,8 @@ export default function MuridPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [jadwalSlots, setJadwalSlots] = useState<JadwalSlot[]>([])
+  const [pemilikSuggestions, setPemilikSuggestions] = useState<string[]>([])
+  const [pakaiCustomPemilik, setPakaiCustomPemilik] = useState(false)
 
   const [form, setForm] = useState({
     nama: '', paket: PAKET_LIST[0], wa_ortu: '',
@@ -24,6 +26,7 @@ export default function MuridPage() {
     jumlah_sesi: 4 as 4 | 8,
     jadwal_hari: '', jadwal_jam: '', jadwal_kolam: KOLAM_PRESETS[0],
     harga: HARGA_BASE[PAKET_LIST[0]].normal,
+    pemilik: 'Ilham',
   })
 
   const updateForm = (updates: Partial<typeof form>) => {
@@ -44,6 +47,7 @@ export default function MuridPage() {
   useEffect(() => {
     load()
     getJadwalSlot().then(setJadwalSlots).catch(() => {})
+    getPemilikSuggestions().then(setPemilikSuggestions).catch(() => {})
   }, [])
 
   const filtered = list.filter((m) =>
@@ -59,18 +63,22 @@ export default function MuridPage() {
   const resetForm = () => {
     setForm({ nama: '', paket: PAKET_LIST[0], wa_ortu: '', kategori: 'normal',
       jumlah_sesi: 4, jadwal_hari: '', jadwal_jam: '', jadwal_kolam: KOLAM_PRESETS[0],
-      harga: HARGA_BASE[PAKET_LIST[0]].normal })
+      harga: HARGA_BASE[PAKET_LIST[0]].normal, pemilik: 'Ilham' })
+    setPakaiCustomPemilik(false)
     setEditingId(null)
   }
 
   const openEdit = (m: Murid) => {
     setEditingId(m.id)
+    const pemilikMurid = m.pemilik || 'Ilham'
+    setPakaiCustomPemilik(!PEMILIK_TETAP.includes(pemilikMurid))
     setForm({
       nama: m.nama, paket: m.paket, wa_ortu: m.wa_ortu ?? '',
       kategori: m.kategori, jumlah_sesi: (m.jumlah_sesi as 4|8) ?? 4,
       jadwal_hari: m.jadwal_hari ?? '', jadwal_jam: m.jadwal_jam ?? '',
       jadwal_kolam: m.jadwal_kolam ?? KOLAM_PRESETS[0],
       harga: m.harga ?? hitungHarga(m.paket, m.kategori, m.jumlah_sesi ?? 4),
+      pemilik: pemilikMurid,
     })
     setShowAdd(true)
   }
@@ -78,6 +86,7 @@ export default function MuridPage() {
   const handleSave = async () => {
     if (!form.nama.trim()) { showToast('Nama harus diisi'); return }
     if (!form.jadwal_hari || !form.jadwal_jam) { showToast('Pilih jadwal hari & jam'); return }
+    if (pakaiCustomPemilik && !form.pemilik.trim()) { showToast('Isi dulu nama pemiliknya'); return }
     setSaving(true)
     try {
       if (editingId) {
@@ -154,6 +163,11 @@ export default function MuridPage() {
               <div className="flex items-center gap-2">
                 <div className="text-[14px] font-semibold text-text truncate">{m.nama}</div>
                 {m.kategori === 'abk' && <span className="bg-yellow/10 text-yellow text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">ABK</span>}
+                {m.pemilik && m.pemilik !== 'Ilham' && (
+                  <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5">
+                    <i className="ti ti-building-bank text-[10px]" />{m.pemilik}
+                  </span>
+                )}
               </div>
               <div className="text-[12px] text-text-muted">{m.paket} · {m.jumlah_sesi ?? 4}x/bulan</div>
               <div className="text-[12px] font-semibold text-blue mt-0.5">
@@ -245,6 +259,39 @@ export default function MuridPage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label className="text-[12px] text-text-muted block mb-1.5">Pemilik (rekening penagihan)</label>
+            <div className="flex flex-wrap gap-2">
+              {PEMILIK_TETAP.map((p) => (
+                <button key={p} onClick={() => { setPakaiCustomPemilik(false); setForm(prev => ({ ...prev, pemilik: p })) }}
+                  className={`px-3.5 py-1.5 rounded-md border text-[12px] font-medium transition-all ${!pakaiCustomPemilik && form.pemilik === p ? 'bg-blue-light border-blue text-blue' : 'border-border text-text-muted'}`}>
+                  {p}
+                </button>
+              ))}
+              <button onClick={() => { setPakaiCustomPemilik(true); setForm(prev => ({ ...prev, pemilik: PEMILIK_TETAP.includes(prev.pemilik) ? '' : prev.pemilik })) }}
+                className={`px-3.5 py-1.5 rounded-md border text-[12px] font-medium transition-all ${pakaiCustomPemilik ? 'bg-blue-light border-blue text-blue' : 'border-border text-text-muted'}`}>
+                <i className="ti ti-pencil text-[11px] mr-1" />Ketik sendiri
+              </button>
+            </div>
+            {pakaiCustomPemilik && (
+              <div className="mt-2">
+                <input type="text" placeholder="Contoh: Ferdy" value={form.pemilik}
+                  onChange={(e) => setForm(prev => ({ ...prev, pemilik: e.target.value }))}
+                  className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+                {pemilikSuggestions.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {pemilikSuggestions.map((s) => (
+                      <button key={s} onClick={() => setForm(prev => ({ ...prev, pemilik: s }))}
+                        className="px-2.5 py-1 rounded-full text-[11px] font-medium bg-blue-light text-blue border border-blue/20 hover:bg-blue/10">
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="bg-blue-light border border-blue/20 rounded-md px-3 py-2.5">

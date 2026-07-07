@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getSlotDariJadwal, setSlotPenuh, setSlotTersedia, setSlotKuota, SlotInfo } from '@/lib/supabase'
+import { getSlotDariJadwal, setSlotPenuh, setSlotTersedia, setSlotKuota, getPemilikSuggestions, SlotInfo } from '@/lib/supabase'
+import { PEMILIK_TETAP } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 
 export default function SlotPage() {
@@ -10,6 +11,12 @@ export default function SlotPage() {
   const [toggling, setToggling] = useState<string | null>(null)
   const [kuotaInput, setKuotaInput] = useState<Record<string, string>>({})
 
+  // Pemilik rekening tujuan buat link pendaftaran yang di-generate
+  const [pemilikPilihan, setPemilikPilihan] = useState<string>('Ilham')
+  const [pakaiCustom, setPakaiCustom] = useState(false)
+  const [customInput, setCustomInput] = useState('')
+  const [pemilikSuggestions, setPemilikSuggestions] = useState<string[]>([])
+
   const load = async () => {
     setLoading(true)
     try { setSlots(await getSlotDariJadwal()) }
@@ -17,7 +24,10 @@ export default function SlotPage() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    getPemilikSuggestions().then(setPemilikSuggestions).catch(() => {})
+  }, [])
 
   const slotKey = (slot: SlotInfo) => `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
 
@@ -63,8 +73,13 @@ export default function SlotPage() {
   }
 
   const generateLink = () => {
+    const pemilikFinal = pakaiCustom ? customInput.trim() : pemilikPilihan
+    if (pakaiCustom && !pemilikFinal) {
+      showToast('Isi dulu nama pemiliknya', 'error')
+      return
+    }
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
-    const link = `${appUrl}/daftar`
+    const link = `${appUrl}/daftar?pemilik=${encodeURIComponent(pemilikFinal)}`
     setGeneratedLink(link)
     showToast('Link berhasil dibuat ✓', 'success')
   }
@@ -111,6 +126,50 @@ export default function SlotPage() {
           <div className="text-[18px] font-bold text-red">{penuhCount}</div>
           <div className="text-[11px] text-text-muted">Penuh</div>
         </div>
+      </div>
+
+      {/* Pemilik rekening tujuan link pendaftaran */}
+      <div className="bg-bg border border-border rounded-lg px-4 py-3 mb-4">
+        <div className="text-[13px] font-bold text-text mb-2 flex items-center gap-1.5">
+          <i className="ti ti-building-bank text-sm" />Pemilik Rekening (buat Link Pendaftaran)
+        </div>
+        <div className="text-[11px] text-text-muted mb-2.5">
+          Pilihan ini nentuin rekening yang muncul ke orang tua pas daftar, dan ikut kesimpen ke data muridnya.
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {PEMILIK_TETAP.map(p => (
+            <button key={p} onClick={() => { setPemilikPilihan(p); setPakaiCustom(false) }}
+              className={`px-3.5 py-1.5 rounded-md text-[12px] font-semibold border transition-colors ${
+                !pakaiCustom && pemilikPilihan === p
+                  ? 'bg-blue text-white border-blue'
+                  : 'bg-bg border-border text-text-muted hover:border-blue/40'}`}>
+              {p}
+            </button>
+          ))}
+          <button onClick={() => setPakaiCustom(true)}
+            className={`px-3.5 py-1.5 rounded-md text-[12px] font-semibold border transition-colors ${
+              pakaiCustom ? 'bg-blue text-white border-blue' : 'bg-bg border-border text-text-muted hover:border-blue/40'}`}>
+            <i className="ti ti-pencil text-[11px] mr-1" />Ketik sendiri
+          </button>
+        </div>
+
+        {pakaiCustom && (
+          <div className="mt-2.5">
+            <input value={customInput} onChange={e => setCustomInput(e.target.value)}
+              placeholder="Contoh: Ferdy"
+              className="w-full px-3 py-2 rounded-md border border-border text-[13px] focus:outline-none focus:border-blue" />
+            {pemilikSuggestions.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {pemilikSuggestions.map(s => (
+                  <button key={s} onClick={() => setCustomInput(s)}
+                    className="px-2.5 py-1 rounded-full text-[11px] font-medium bg-blue-light text-blue border border-blue/20 hover:bg-blue/10">
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {loading && (
