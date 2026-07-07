@@ -476,6 +476,23 @@ export const nonaktifkanPromo = async (id: string) => {
   if (error) throw error
 }
 
+// Hapus kode promo permanen dari database
+export const hapusPromo = async (id: string) => {
+  const { error } = await supabase.from('promo').delete().eq('id', id)
+  if (error) throw error
+}
+
+// Ambil daftar anak/pendaftar yang pakai kode promo tertentu
+export const getMuridPakaiPromo = async (kode: string) => {
+  const { data, error } = await supabase
+    .from('pending_members')
+    .select('id, nama_murid, nama_ortu, status, diskon, created_at')
+    .eq('kode_promo', kode)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
 // Cek apakah ada minimal 1 kode promo yang masih aktif (buat nampilin/nyembunyiin box kode di form daftar)
 export const adaPromoAktif = async (): Promise<boolean> => {
   const { count, error } = await supabase

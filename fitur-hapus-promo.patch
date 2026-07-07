@@ -1,0 +1,172 @@
+diff --git a/app/dashboard/promo/page.tsx b/app/dashboard/promo/page.tsx
+index d16dc54..de2edeb 100644
+--- a/app/dashboard/promo/page.tsx
++++ b/app/dashboard/promo/page.tsx
+@@ -1,6 +1,6 @@
+ 'use client'
+ import { useEffect, useState } from 'react'
+-import { getAllPromo, createPromo, nonaktifkanPromo, PromoInfo } from '@/lib/supabase'
++import { getAllPromo, createPromo, nonaktifkanPromo, hapusPromo, getMuridPakaiPromo, PromoInfo } from '@/lib/supabase'
+ import { formatRibuan, parseRibuan, fmtRupiah } from '@/lib/utils'
+ import { showToast } from '@/components/ui/Toast'
+ 
+@@ -8,6 +8,9 @@ export default function PromoPage() {
+   const [promoList, setPromoList] = useState<PromoInfo[]>([])
+   const [loading, setLoading] = useState(true)
+   const [saving, setSaving] = useState(false)
++  const [expanded, setExpanded] = useState<string | null>(null)
++  const [pemakai, setPemakai] = useState<Record<string, any[]>>({})
++  const [loadingPemakai, setLoadingPemakai] = useState<string | null>(null)
+ 
+   const [tipe, setTipe] = useState<'baru' | 'lama'>('baru')
+   const [kode, setKode] = useState('')
+@@ -57,6 +60,28 @@ export default function PromoPage() {
+     } catch (e: any) { showToast('Gagal: ' + e?.message, 'error') }
+   }
+ 
++  const hapus = async (p: PromoInfo) => {
++    if (!confirm(`Hapus permanen kode ${p.kode}? Data pemakaian sebelumnya tetap tersimpan di data pendaftar, cuma kodenya yang hilang.`)) return
++    try {
++      await hapusPromo(p.id)
++      showToast('Kode dihapus', 'success')
++      load()
++    } catch (e: any) { showToast('Gagal: ' + e?.message, 'error') }
++  }
++
++  const toggleExpand = async (p: PromoInfo) => {
++    if (expanded === p.id) { setExpanded(null); return }
++    setExpanded(p.id)
++    if (!pemakai[p.kode]) {
++      setLoadingPemakai(p.kode)
++      try {
++        const list = await getMuridPakaiPromo(p.kode)
++        setPemakai(prev => ({ ...prev, [p.kode]: list }))
++      } catch (e: any) { showToast('Gagal load data pemakai: ' + e?.message, 'error') }
++      finally { setLoadingPemakai(null) }
++    }
++  }
++
+   const statusPromo = (p: PromoInfo): 'aktif' | 'habis' | 'nonaktif' => {
+     if (!p.aktif) return p.terpakai >= p.kuota ? 'habis' : 'nonaktif'
+     return 'aktif'
+@@ -163,31 +188,72 @@ export default function PromoPage() {
+       <div className="flex flex-col gap-2">
+         {promoList.map((p) => {
+           const st = statusPromo(p)
++          const isExpanded = expanded === p.id
++          const listPemakai = pemakai[p.kode] ?? []
+           return (
+-            <div key={p.id} className={`flex items-center gap-3 px-4 py-3 rounded-lg border shadow-sm ${
++            <div key={p.id} className={`rounded-lg border shadow-sm overflow-hidden ${
+               st === 'aktif' ? 'bg-bg border-border' : 'bg-red/5 border-red/20'
+             }`}>
+-              <div className="flex-1 min-w-0">
+-                <div className="flex items-center gap-2">
+-                  <span className="font-mono font-bold text-[13px] text-text tracking-wide">{p.kode}</span>
+-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-2 text-text-muted font-medium">
+-                    {p.tipe === 'baru' ? 'Murid Baru' : 'Murid Lama'}
+-                  </span>
++              <button onClick={() => toggleExpand(p)} className="w-full flex items-center gap-3 px-4 py-3 text-left">
++                <div className="flex-1 min-w-0">
++                  <div className="flex items-center gap-2">
++                    <span className="font-mono font-bold text-[13px] text-text tracking-wide">{p.kode}</span>
++                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-2 text-text-muted font-medium">
++                      {p.tipe === 'baru' ? 'Murid Baru' : 'Murid Lama'}
++                    </span>
++                  </div>
++                  <div className="text-[12px] text-text-muted mt-0.5">
++                    Potongan {fmtRupiah(p.diskon_nominal)}/orang · Dipakai {p.terpakai}/{p.kuota}
++                  </div>
+                 </div>
+-                <div className="text-[12px] text-text-muted mt-0.5">
+-                  Potongan {fmtRupiah(p.diskon_nominal)} · Dipakai {p.terpakai}/{p.kuota}
++                <span className={`text-[10px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${
++                  st === 'aktif' ? 'bg-green/10 text-green' : st === 'habis' ? 'bg-red/10 text-red' : 'bg-bg-2 text-text-muted'
++                }`}>
++                  {st === 'aktif' ? 'Aktif' : st === 'habis' ? 'Habis' : 'Nonaktif'}
++                </span>
++                <i className={`ti ti-chevron-down text-text-muted text-base transition-transform flex-shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
++              </button>
++
++              {isExpanded && (
++                <div className="px-4 pb-3 border-t border-border/60 pt-2.5">
++                  <div className="text-[11px] font-semibold text-text-muted uppercase tracking-wide mb-2">
++                    Anak yang pakai kode ini
++                  </div>
++                  {loadingPemakai === p.kode ? (
++                    <div className="text-[12px] text-text-muted py-2">Memuat...</div>
++                  ) : listPemakai.length === 0 ? (
++                    <div className="text-[12px] text-text-muted py-2">Belum ada yang pakai kode ini</div>
++                  ) : (
++                    <div className="flex flex-col gap-1.5 mb-3">
++                      {listPemakai.map((m) => (
++                        <div key={m.id} className="flex items-center justify-between text-[12px] bg-bg-2 rounded-md px-3 py-2">
++                          <div>
++                            <span className="font-semibold text-text">{m.nama_murid}</span>
++                            <span className="text-text-muted"> · ortu {m.nama_ortu}</span>
++                          </div>
++                          <div className="flex items-center gap-2 flex-shrink-0">
++                            <span className="text-green font-medium">-{fmtRupiah(m.diskon)}</span>
++                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
++                              m.status === 'diterima' ? 'bg-green/10 text-green' : m.status === 'ditolak' ? 'bg-red/10 text-red' : 'bg-yellow/10 text-yellow-600'
++                            }`}>{m.status}</span>
++                          </div>
++                        </div>
++                      ))}
++                    </div>
++                  )}
++                  <div className="flex gap-2">
++                    {st === 'aktif' && (
++                      <button onClick={() => matikan(p)}
++                        className="text-[11px] text-yellow-600 font-medium px-3 py-1.5 rounded-md hover:bg-yellow-50 transition-all border border-yellow-200">
++                        Nonaktifkan
++                      </button>
++                    )}
++                    <button onClick={() => hapus(p)}
++                      className="text-[11px] text-red font-medium px-3 py-1.5 rounded-md hover:bg-red/10 transition-all border border-red/20">
++                      Hapus Permanen
++                    </button>
++                  </div>
+                 </div>
+-              </div>
+-              <span className={`text-[10px] font-semibold px-2 py-1 rounded-full flex-shrink-0 ${
+-                st === 'aktif' ? 'bg-green/10 text-green' : st === 'habis' ? 'bg-red/10 text-red' : 'bg-bg-2 text-text-muted'
+-              }`}>
+-                {st === 'aktif' ? 'Aktif' : st === 'habis' ? 'Habis' : 'Nonaktif'}
+-              </span>
+-              {st === 'aktif' && (
+-                <button onClick={() => matikan(p)}
+-                  className="text-[11px] text-red font-medium px-2 py-1 rounded-md hover:bg-red/10 transition-all flex-shrink-0">
+-                  Matikan
+-                </button>
+               )}
+             </div>
+           )
+diff --git a/lib/supabase.ts b/lib/supabase.ts
+index 2730c3b..a2e01e5 100644
+--- a/lib/supabase.ts
++++ b/lib/supabase.ts
+@@ -476,6 +476,23 @@ export const nonaktifkanPromo = async (id: string) => {
+   if (error) throw error
+ }
+ 
++// Hapus kode promo permanen dari database
++export const hapusPromo = async (id: string) => {
++  const { error } = await supabase.from('promo').delete().eq('id', id)
++  if (error) throw error
++}
++
++// Ambil daftar anak/pendaftar yang pakai kode promo tertentu
++export const getMuridPakaiPromo = async (kode: string) => {
++  const { data, error } = await supabase
++    .from('pending_members')
++    .select('id, nama_murid, nama_ortu, status, diskon, created_at')
++    .eq('kode_promo', kode)
++    .order('created_at', { ascending: false })
++  if (error) throw error
++  return data ?? []
++}
++
+ // Cek apakah ada minimal 1 kode promo yang masih aktif (buat nampilin/nyembunyiin box kode di form daftar)
+ export const adaPromoAktif = async (): Promise<boolean> => {
+   const { count, error } = await supabase
