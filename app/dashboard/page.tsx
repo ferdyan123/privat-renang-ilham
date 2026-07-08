@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
-import { getSesiByTanggal, getMurid, getAbsensi, upsertAbsensiBatch, addSesi, getMuridSiapTagih, getSlotDariJadwal, Sesi, Murid, Absensi } from '@/lib/supabase'
+import { getSesiByTanggal, getMurid, getAbsensi, upsertAbsensiBatch, addSesi, getMuridSiapTagih, getSlotDariJadwal, getAllMuridJadwal, getAllJadwalPengganti, Sesi, Murid, Absensi, MuridJadwal, JadwalPengganti } from '@/lib/supabase'
 import { sendLocalNotif } from '@/components/ui/NotificationSetup'
 import { fmtTgl, todayStr, KOLAM_PRESETS, jamSelesai } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
@@ -14,6 +14,8 @@ export default function HariIniPage() {
   const dateInputRef = useRef<HTMLInputElement>(null)
   const [sesiList, setSesiList] = useState<Sesi[]>([])
   const [muridList, setMuridList] = useState<Murid[]>([])
+  const [muridJadwalList, setMuridJadwalList] = useState<(MuridJadwal & { murid_nama: string; murid_aktif: boolean })[]>([])
+  const [penggantiList, setPenggantiList] = useState<JadwalPengganti[]>([])
   const [absenMap, setAbsenMap] = useState<Record<string, Record<string, Absensi['status']>>>({})
   const [loading, setLoading] = useState(true)
   const [showTambah, setShowTambah] = useState(false)
@@ -33,7 +35,7 @@ export default function HariIniPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [sesiReal, murid] = await Promise.all([getSesiByTanggal(selectedDate), getMurid()])
+      const [sesiReal, murid, muridJadwal, pengganti] = await Promise.all([getSesiByTanggal(selectedDate), getMurid(), getAllMuridJadwal(), getAllJadwalPengganti()])
       let sesi = [...sesiReal]
 
       // Kalau ada pola jadwal mingguan (dari sesi yang pernah dibuat sebelumnya) yang
@@ -64,6 +66,8 @@ export default function HariIniPage() {
 
       setSesiList(sesi)
       setMuridList(murid)
+      setMuridJadwalList(muridJadwal)
+      setPenggantiList(pengganti)
       const map: Record<string, Record<string, Absensi['status']>> = {}
       await Promise.all(sesi.filter((s) => !s.id.startsWith('virtual::')).map(async (s) => {
         const abs = await getAbsensi(s.id)
@@ -160,13 +164,32 @@ export default function HariIniPage() {
   const hadirCount = (sesiId: string, murids: Murid[] = muridList) =>
     murids.filter((m) => absenMap[sesiId]?.[m.id] === 'hadir').length
 
-  // Cuma murid yang jadwal tetapnya (hari+jam+kolam) cocok sama sesi ini
+  // Cuma murid yang punya SALAH SATU jadwal (hari+jam+kolam) cocok sama sesi ini.
+  // Murid dengan 2 jadwal (misal paket 8x/bulan) otomatis nongol di 2 sesi berbeda.
+  // Ditambah: kalau ada jadwal pengganti (kelas makeup 1x), nama dia dipindah
+  // dari sesi asal ke sesi baru KHUSUS di tanggal itu — minggu depan balik normal.
   const muridUntukSesi = (s: Sesi) => {
     const hari = HARI_ID[new Date(s.tanggal + 'T00:00:00').getDay()]
     const jamMulai = `${s.jam}:${s.menit}`
-    return muridList.filter((m) =>
-      m.jadwal_hari === hari && m.jadwal_jam === jamMulai && m.jadwal_kolam === s.kolam
+
+    // Murid yang lagi "cuti" dari sesi ini di tanggal ini (udah pindah ke tanggal lain)
+    const idsPindahKeluar = new Set(
+      penggantiList.filter((p) => p.tanggal_asal === s.tanggal).map((p) => p.murid_id)
     )
+
+    const muridIds = new Set(
+      muridJadwalList
+        .filter((mj) => mj.hari === hari && mj.jam_mulai === jamMulai && (mj.kolam ?? '') === s.kolam)
+        .map((mj) => mj.murid_id)
+        .filter((id) => !idsPindahKeluar.has(id))
+    )
+
+    // Murid yang pindah MASUK ke sesi ini (makeup di tanggal ini)
+    penggantiList
+      .filter((p) => p.tanggal_baru === s.tanggal && p.jam === jamMulai && (p.kolam ?? '') === s.kolam)
+      .forEach((p) => muridIds.add(p.murid_id))
+
+    return muridList.filter((m) => muridIds.has(m.id))
   }
 
   // Konfigurasi 3 tombol status

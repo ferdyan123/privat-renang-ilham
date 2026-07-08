@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getSesi, getMurid, addSesiBatch, updateSesi, deleteSesi, Sesi, Murid } from '@/lib/supabase'
-import { fmtTgl, fmtShort, jamSelesai, KOLAM_PRESETS } from '@/lib/utils'
+import { getSesi, getMurid, addSesiBatch, updateSesi, deleteSesi, getAllMuridJadwal, getAllJadwalPengganti, Sesi, Murid, MuridJadwal, JadwalPengganti } from '@/lib/supabase'
+import { fmtTgl, fmtShort, jamSelesai, todayStr, KOLAM_PRESETS } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
 
@@ -9,6 +9,8 @@ export default function JadwalPage() {
   const [sesiList, setSesiList] = useState<Sesi[]>([])
   const [loading, setLoading] = useState(true)
   const [muridList, setMuridList] = useState<Murid[]>([])
+  const [muridJadwalList, setMuridJadwalList] = useState<(MuridJadwal & { murid_nama: string; murid_aktif: boolean })[]>([])
+  const [penggantiList, setPenggantiList] = useState<JadwalPengganti[]>([])
   const [showAdd, setShowAdd] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -30,7 +32,7 @@ export default function JadwalPage() {
 
   const load = async () => {
     setLoading(true)
-    try { const [sesi, murid] = await Promise.all([getSesi(200), getMurid()]); setSesiList(sesi); setMuridList(murid) }
+    try { const [sesi, murid, muridJadwal, pengganti] = await Promise.all([getSesi(200), getMurid(), getAllMuridJadwal(), getAllJadwalPengganti()]); setSesiList(sesi); setMuridList(murid); setMuridJadwalList(muridJadwal); setPenggantiList(pengganti) }
     catch (e: any) { showToast('Gagal load: ' + (e?.message || ''), 'error'); console.error(e) }
     finally { setLoading(false) }
   }
@@ -41,7 +43,8 @@ export default function JadwalPage() {
     acc[s.tanggal] = acc[s.tanggal] ? [...acc[s.tanggal], s] : [s]
     return acc
   }, {})
-  const sortedDates = Object.keys(grouped).sort().reverse()
+  // Urut dari tanggal PALING DEKET dulu (ascending) — bukan yang paling baru dibuat
+  const sortedDates = Object.keys(grouped).sort()
 
   const openEdit = (s: Sesi) => {
     setEditingId(s.id)
@@ -61,7 +64,7 @@ export default function JadwalPage() {
   }
 
   const handleAdd = async () => {
-    if (!tgl) { showToast('Pilih tanggal'); return }
+    if (!repeat && !tgl) { showToast('Pilih tanggal'); return }
     setSaving(true)
     try {
       if (editingId) {
@@ -76,7 +79,7 @@ export default function JadwalPage() {
       if (!repeat) {
         await addSesiBatch([{ tanggal: tgl, jam, menit, durasi, kolam }])
       } else {
-        const start = new Date(tgl + 'T00:00:00')
+        const start = new Date((tgl || todayStr()) + 'T00:00:00')
         const payloads: Omit<Sesi,'id'>[] = []
         for (let w = 0; w < repeatWeeks; w++) {
           repeatDays.forEach((d) => {
@@ -126,9 +129,17 @@ export default function JadwalPage() {
 
       {sortedDates.map((tglKey) => {
         const hariSesi = new Date(tglKey + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long' })
-        const muridHariIni = muridList.filter((m) =>
-          m.jadwal_hari && m.jadwal_hari.toLowerCase() === hariSesi.toLowerCase()
-        )
+        const idsPindahKeluar = new Set(penggantiList.filter((p) => p.tanggal_asal === tglKey).map((p) => p.murid_id))
+        const muridHariIni = muridJadwalList
+          .filter((mj) => mj.murid_aktif && mj.hari.toLowerCase() === hariSesi.toLowerCase() && !idsPindahKeluar.has(mj.murid_id))
+          .map((mj) => ({ mj, murid: muridList.find((m) => m.id === mj.murid_id) }))
+          .filter((x): x is { mj: typeof x.mj; murid: Murid } => !!x.murid)
+          .concat(
+            penggantiList
+              .filter((p) => p.tanggal_baru === tglKey)
+              .map((p) => ({ mj: { id: p.id, jam_mulai: p.jam } as MuridJadwal, murid: muridList.find((m) => m.id === p.murid_id) }))
+              .filter((x): x is { mj: MuridJadwal; murid: Murid } => !!x.murid)
+          )
         return (
           <div key={tglKey} className="mb-4">
             <div className="text-[12px] font-semibold text-text-muted uppercase tracking-wide mb-2 px-1">
@@ -165,9 +176,9 @@ export default function JadwalPage() {
                   <i className="ti ti-users text-xs mr-1" />Murid terdaftar hari {hariSesi} ({muridHariIni.length})
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {muridHariIni.map((m) => (
-                    <span key={m.id} className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${m.kategori === 'abk' ? 'bg-yellow/10 text-yellow' : 'bg-blue-light text-blue'}`}>
-                      {m.nama}{m.jadwal_jam ? ` · ${m.jadwal_jam}` : ''}
+                  {muridHariIni.map(({ mj, murid }) => (
+                    <span key={mj.id} className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${murid.kategori === 'abk' ? 'bg-yellow/10 text-yellow' : 'bg-blue-light text-blue'}`}>
+                      {murid.nama}{mj.jam_mulai ? ` · ${mj.jam_mulai}` : ''}
                     </span>
                   ))}
                 </div>
@@ -186,11 +197,18 @@ export default function JadwalPage() {
 
       <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title={editingId ? "Edit Sesi" : "Tambah Sesi Baru"}>
         <div className="flex flex-col gap-3">
-          <div>
-            <label className="text-[12px] text-text-muted block mb-1">Tanggal</label>
-            <input type="date" value={tgl} onChange={(e) => setTgl(e.target.value)}
-              className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
-          </div>
+          {!repeat && (
+            <div>
+              <label className="text-[12px] text-text-muted block mb-1">Tanggal</label>
+              <input type="date" value={tgl} onChange={(e) => setTgl(e.target.value)}
+                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+            </div>
+          )}
+          {repeat && !editingId && (
+            <div className="text-[11px] text-text-muted italic -mb-1">
+              Tanggal gak perlu diisi — otomatis mulai dari hari terdekat sesuai hari yang kamu pilih di bawah.
+            </div>
+          )}
           <div>
             <label className="text-[12px] text-text-muted block mb-1">Jam mulai</label>
             <div className="flex gap-2">
@@ -240,7 +258,7 @@ export default function JadwalPage() {
           {/* Repeat toggle — hanya untuk sesi baru */}
           {!editingId && (
           <label className="flex items-center gap-2 cursor-pointer">
-            <div onClick={() => setRepeat(!repeat)}
+            <div onClick={() => { const next = !repeat; setRepeat(next); if (next) setTgl('') }}
               className={`w-10 h-5 rounded-full transition-all relative ${repeat ? 'bg-blue' : 'bg-border'}`}>
               <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${repeat ? 'left-5' : 'left-0.5'}`} />
             </div>
@@ -265,13 +283,23 @@ export default function JadwalPage() {
               <div>
                 <label className="text-[12px] text-text-muted block mb-1">Selama (minggu)</label>
                 <div className="flex gap-2">
-                  {[4,8,12].map((w) => (
+                  {[
+                    { w: 4, label: '4x' },
+                    { w: 8, label: '8x' },
+                    { w: 12, label: '12x' },
+                    { w: 52, label: 'Selalu' },
+                  ].map(({ w, label }) => (
                     <button key={w} onClick={() => setRepeatWeeks(w)}
                       className={`flex-1 py-2 rounded-md border text-[13px] font-medium transition-all ${repeatWeeks === w ? 'bg-blue-light border-blue text-blue' : 'border-border text-text-muted'}`}>
-                      {w}x
+                      {label}
                     </button>
                   ))}
                 </div>
+                {repeatWeeks === 52 && (
+                  <div className="text-[11px] text-text-muted mt-1.5">
+                    "Selalu" otomatis bikin jadwal buat 52 minggu (~1 tahun) ke depan. Kalau udah mau habis, tinggal ulangi lagi.
+                  </div>
+                )}
               </div>
             </>
           )}

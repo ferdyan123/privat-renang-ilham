@@ -64,6 +64,35 @@ function DaftarPublikPageContent() {
     nama_ortu: '', wa_ortu: '',
   })
 
+  // Bisa pilih lebih dari 1 jadwal. Jumlah slot yang WAJIB dipilih mengikuti paket:
+  // 4x/bulan = 1x seminggu → pilih 1 jadwal. 8x/bulan = 2x seminggu → pilih 2 jadwal.
+  const [jadwalPilihan, setJadwalPilihan] = useState<JadwalSlot[]>([])
+  const maxJadwal = form.jumlah_sesi === '8' ? 2 : 1
+
+  const toggleJadwal = (s: JadwalSlot) => {
+    setJadwalPilihan((prev) => {
+      const exists = prev.some((p) => p.hari === s.hari && p.jam_mulai === s.jam_mulai && p.kolam === s.kolam)
+      if (exists) return prev.filter((p) => !(p.hari === s.hari && p.jam_mulai === s.jam_mulai && p.kolam === s.kolam))
+      if (prev.length >= maxJadwal) {
+        showToast(`Paket ${form.jumlah_sesi}x/bulan cuma bisa pilih ${maxJadwal} jadwal`, 'error')
+        return prev
+      }
+      return [...prev, s]
+    })
+  }
+
+  // Ganti jumlah sesi → potong pilihan jadwal kalau melebihi kuota slot paket baru
+  const pilihJumlahSesi = (n: string) => {
+    up('jumlah_sesi', n)
+    const maxBaru = n === '8' ? 2 : 1
+    setJadwalPilihan((prev) => prev.slice(0, maxBaru))
+  }
+
+  // Gabungkan pilihan jadwal jadi string "Senin, Rabu" / "16:00, 16:00" buat disimpan ke kolom lama
+  const jadwalHariGabungan = jadwalPilihan.map((s) => s.hari).join(', ')
+  const jadwalJamGabungan = jadwalPilihan.map((s) => s.jam_mulai).join(', ')
+  const jadwalRingkas = jadwalPilihan.map((s) => `${s.hari} ${s.jam_mulai} (${s.kolam})`).join(', ')
+
   const up = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   useEffect(() => {
@@ -99,7 +128,7 @@ function DaftarPublikPageContent() {
 
   const stepValid = () => {
     if (step === 0) return form.nama_murid.trim() && form.usia && form.jenis_kelamin && form.kategori && form.nama_ortu.trim() && form.wa_ortu.trim()
-    if (step === 1) return form.paket && form.jumlah_sesi && form.jadwal_hari && form.jadwal_jam
+    if (step === 1) return form.paket && form.jumlah_sesi && jadwalPilihan.length === maxJadwal
     return true
   }
 
@@ -129,10 +158,11 @@ function DaftarPublikPageContent() {
         nama_ortu: form.nama_ortu,
         wa_ortu: form.wa_ortu,
         paket: form.paket + (form.kategori === 'abk' ? ' +ABK' : '') + ' ' + form.jumlah_sesi + 'x',
-        jadwal_hari: form.jadwal_hari,
-        jadwal_jam: form.jadwal_jam,
+        jadwal_hari: jadwalHariGabungan,
+        jadwal_jam: jadwalJamGabungan,
+        jadwal_kolam: jadwalPilihan.map((s) => s.kolam).join(', '),
         bukti_tf_url,
-        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Sesi: ${form.jumlah_sesi}x | Harga: ${fmtRupiah(hargaSekarang)}${promoValid ? ` | Promo: ${promoValid.kode} (-${fmtRupiah(diskonAktif)})` : ''}${form.catatan ? ' | ' + form.catatan : ''}`,
+        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Sesi: ${form.jumlah_sesi}x | Jadwal: ${jadwalRingkas} | Harga: ${fmtRupiah(hargaSekarang)}${promoValid ? ` | Promo: ${promoValid.kode} (-${fmtRupiah(diskonAktif)})` : ''}${form.catatan ? ' | ' + form.catatan : ''}`,
         jumlah_sesi: parseInt(form.jumlah_sesi),
         harga: totalSetelahDiskon,
         kode_promo: promoValid?.kode ?? null,
@@ -170,7 +200,7 @@ function DaftarPublikPageContent() {
         <div className="bg-[#E6F4FB] rounded-xl p-4 text-left text-[13px] text-gray-600 mb-4 space-y-1">
           <div className="font-semibold text-[#185FA5] mb-1.5">Ringkasan Pendaftaran</div>
           <div>Kelas: <strong>{form.paket} ({form.jumlah_sesi}x/bulan)</strong></div>
-          <div>Jadwal: <strong>{form.jadwal_hari} · {form.jadwal_jam}</strong></div>
+          <div>Jadwal: <strong>{jadwalPilihan.map((s) => `${s.hari} ${s.jam_mulai}`).join(', ')}</strong></div>
           <div>Kategori: <strong>{form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'}</strong></div>
         </div>
         <div className="text-[12px] text-gray-400 leading-relaxed">
@@ -346,9 +376,10 @@ function DaftarPublikPageContent() {
                   <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Jumlah Sesi per Bulan</label>
                   <div className="flex gap-2">
                     {['4', '8'].map((n) => (
-                      <button key={n} onClick={() => up('jumlah_sesi', n)}
+                      <button key={n} onClick={() => pilihJumlahSesi(n)}
                         className={`flex-1 py-2.5 rounded-xl border-2 text-[13px] font-medium transition-all ${form.jumlah_sesi === n ? 'border-[#185FA5] bg-[#E6F4FB] text-[#185FA5]' : 'border-gray-100 bg-gray-50 text-gray-600'}`}>
                         <div className="font-bold">{n}x / bulan</div>
+                        <div className="text-[10px] opacity-60">{n === '8' ? '2x seminggu · pilih 2 jadwal' : '1x seminggu · pilih 1 jadwal'}</div>
                         {form.kategori && form.paket && (
                           <div className="text-[11px] mt-0.5 opacity-70">
                             {fmtRupiah(hitungHarga(form.paket, form.kategori, parseInt(n)))}
@@ -364,6 +395,13 @@ function DaftarPublikPageContent() {
                 <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">
                   Hari & Jam yang Diinginkan
                 </label>
+                <div className="text-[11px] -mt-1 mb-2">
+                  <span className={jadwalPilihan.length === maxJadwal ? 'text-[#185FA5] font-semibold' : 'text-gray-400'}>
+                    {maxJadwal === 2
+                      ? `Paket 8x/bulan = 2x seminggu, pilih tepat 2 jadwal (${jadwalPilihan.length}/2 dipilih)`
+                      : `Pilih 1 jadwal (${jadwalPilihan.length}/1 dipilih)`}
+                  </span>
+                </div>
                 {/* Group by kolam */}
                 {(() => {
                   const grouped = jadwalSlots.reduce<Record<string, JadwalSlot[]>>((acc, s) => {
@@ -377,17 +415,14 @@ function DaftarPublikPageContent() {
                       </div>
                       <div className="flex flex-col gap-1.5">
                         {slots.map(s => {
-                          const isSelected = form.jadwal_hari === s.hari && form.jadwal_jam === s.jam_mulai && form.catatan?.includes(s.kolam)
+                          const isSelected = jadwalPilihan.some((p) => p.hari === s.hari && p.jam_mulai === s.jam_mulai && p.kolam === s.kolam)
                           const isPenuh = s.status === 'penuh'
                           return (
                             <button key={`${s.hari}-${s.jam_mulai}-${s.kolam}`}
                               disabled={isPenuh}
                               onClick={() => {
                                 if (isPenuh) return
-                                up('jadwal_hari', s.hari)
-                                up('jadwal_jam', s.jam_mulai)
-                                // Simpan kolam di catatan sementara
-                                setForm(f => ({ ...f, jadwal_hari: s.hari, jadwal_jam: s.jam_mulai, catatan: (f.catatan || '').replace(/Kolam:[^|]*/,'') + `Kolam: ${s.kolam} ` }))
+                                toggleJadwal(s)
                               }}
                               className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border-2 text-left transition-all ${
                                 isPenuh
@@ -493,7 +528,7 @@ function DaftarPublikPageContent() {
                     ['Kelas', form.paket],
                     ['Sesi', form.jumlah_sesi + 'x/bulan'],
                     ['Kategori', form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'],
-                    ['Jadwal', `${form.jadwal_hari} · ${form.jadwal_jam}`],
+                    ['Jadwal', jadwalPilihan.map((s) => `${s.hari} ${s.jam_mulai}`).join(', ')],
                     ...(promoValid ? [
                       ['Subtotal', hargaSekarang > 0 ? fmtRupiah(hargaSekarang) : '-'],
                       ['Diskon', `- ${fmtRupiah(diskonAktif)}`],

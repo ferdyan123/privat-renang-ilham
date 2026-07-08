@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getPendingMembers, updatePendingStatus, addMurid, getTagihanPending, getTagihanHistory, updateTagihanStatus, PendingMember } from '@/lib/supabase'
+import { getPendingMembers, updatePendingStatus, addMurid, getTagihanPending, getTagihanHistory, updateTagihanStatus, zipJadwal, PendingMember } from '@/lib/supabase'
 import { showToast } from '@/components/ui/Toast'
 import Avatar from '@/components/ui/Avatar'
 
@@ -49,9 +49,18 @@ export default function DaftarPage() {
     if (!confirm(`ACC pendaftaran ${d.nama_murid}?`)) return
     try {
       await updatePendingStatus(d.id, 'diterima')
-      // Kolam disimpan sebagai teks di dalam catatan, format "Kolam: Kolam A"
+      // Kolam disimpan sebagai teks di dalam catatan (format lama), format "Kolam: Kolam A"
+      // — dipakai sebagai fallback kalau pendaftaran ini dari SEBELUM kolom jadwal_kolam ada.
       const kolamMatch = d.catatan?.match(/Kolam:\s*([^|]+)/)
-      const kolam = kolamMatch ? kolamMatch[1].trim() : ''
+      const kolamFallback = kolamMatch ? kolamMatch[1].trim() : null
+
+      // Pecah jadwal gabungan ("Senin, Rabu" / "16:00, 16:00" / "Kolam A, Kolam A")
+      // jadi beberapa baris slot — 1 murid bisa punya lebih dari 1 jadwal seminggu.
+      const jadwalList = zipJadwal(d.jadwal_hari, d.jadwal_jam, d.jadwal_kolam).map((s) => ({
+        ...s,
+        kolam: s.kolam || kolamFallback,
+      }))
+
       await addMurid({
         nama: d.nama_murid,
         paket: d.paket,
@@ -59,11 +68,11 @@ export default function DaftarPage() {
         kategori: 'normal',
         jadwal_hari: d.jadwal_hari,
         jadwal_jam: d.jadwal_jam,
-        jadwal_kolam: kolam,
+        jadwal_kolam: jadwalList[0]?.kolam ?? '',
         harga: d.harga ?? 0,
         jumlah_sesi: d.jumlah_sesi ?? 4,
         pemilik: d.pemilik || 'Ilham',
-      })
+      }, jadwalList)
       showToast(`${d.nama_murid} diterima ✓`, 'success')
       loadPendaftaran()
     } catch { showToast('Gagal acc', 'error') }

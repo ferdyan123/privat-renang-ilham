@@ -38,6 +38,25 @@ export interface Absensi {
   status: 'hadir' | 'izin' | 'alpha'
 }
 
+export interface MuridJadwal {
+  id: string
+  murid_id: string
+  hari: string
+  jam_mulai: string
+  kolam: string | null
+}
+
+// Kelas pengganti/makeup — pengecualian 1x per tanggal, gak ngubah pola mingguan tetap
+export interface JadwalPengganti {
+  id: string
+  murid_id: string
+  tanggal_asal: string   // 'YYYY-MM-DD' — tanggal spesifik yang di-skip
+  tanggal_baru: string   // 'YYYY-MM-DD' — tanggal spesifik penggantinya
+  jam: string
+  kolam: string | null
+  keterangan: string | null
+}
+
 export interface PendingMember {
   id: string
   nama_murid: string
@@ -47,6 +66,7 @@ export interface PendingMember {
   paket: string
   jadwal_hari: string
   jadwal_jam: string
+  jadwal_kolam: string | null
   jumlah_sesi: number
   harga: number
   bukti_tf_url: string | null
@@ -68,18 +88,130 @@ export const getMurid = async (): Promise<Murid[]> => {
   return data
 }
 
-export const addMurid = async (payload: Omit<Murid, 'id' | 'aktif'>): Promise<Murid> => {
+export const addMurid = async (
+  payload: Omit<Murid, 'id' | 'aktif'>,
+  jadwalList?: { hari: string; jam_mulai: string; kolam: string | null }[]
+): Promise<Murid> => {
   const { data, error } = await supabase
     .from('murid')
     .insert({ ...payload, aktif: true })
     .select()
     .single()
   if (error) throw error
+  if (jadwalList && jadwalList.length > 0) {
+    await replaceMuridJadwal(data.id, jadwalList)
+  }
   return data
 }
 
 export const deleteMurid = async (id: string) => {
   const { error } = await supabase.from('murid').update({ aktif: false }).eq('id', id)
+  if (error) throw error
+}
+
+// ── Multi jadwal per murid (misal paket 8x/bulan = 2x seminggu) ────────────
+
+// Semua jadwal semua murid sekaligus, join nama & status aktif — dipakai di
+// halaman Jadwal & Hari Ini buat nentuin murid mana yang masuk sesi tertentu.
+export const getAllMuridJadwal = async (): Promise<
+  (MuridJadwal & { murid_nama: string; murid_aktif: boolean })[]
+> => {
+  const { data, error } = await supabase
+    .from('murid_jadwal')
+    .select('id, murid_id, hari, jam_mulai, kolam, murid:murid_id ( nama, aktif )')
+  if (error) throw error
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    murid_id: r.murid_id,
+    hari: r.hari,
+    jam_mulai: r.jam_mulai,
+    kolam: r.kolam,
+    murid_nama: r.murid?.nama ?? '',
+    murid_aktif: r.murid?.aktif ?? false,
+  }))
+}
+
+// Jadwal milik 1 murid spesifik — dipakai buat isi form edit di halaman Murid
+export const getMuridJadwalByMurid = async (muridId: string): Promise<MuridJadwal[]> => {
+  const { data, error } = await supabase.from('murid_jadwal').select('*').eq('murid_id', muridId)
+  if (error) throw error
+  return data ?? []
+}
+
+// Ganti SEMUA slot jadwal seorang murid (hapus yang lama, insert yang baru).
+// Juga sinkronin kolom ringkasan lama (jadwal_hari/jadwal_jam/jadwal_kolam) di
+// tabel murid biar kartu murid & filter cepat tetap kebaca tanpa join ekstra.
+export const replaceMuridJadwal = async (
+  muridId: string,
+  slots: { hari: string; jam_mulai: string; kolam: string | null }[]
+) => {
+  const { error: delErr } = await supabase.from('murid_jadwal').delete().eq('murid_id', muridId)
+  if (delErr) throw delErr
+
+  if (slots.length > 0) {
+    const { error: insErr } = await supabase
+      .from('murid_jadwal')
+      .insert(slots.map((s) => ({ murid_id: muridId, hari: s.hari, jam_mulai: s.jam_mulai, kolam: s.kolam })))
+    if (insErr) throw insErr
+  }
+
+  const { error: updErr } = await supabase
+    .from('murid')
+    .update({
+      jadwal_hari: slots.map((s) => s.hari).join(', '),
+      jadwal_jam: slots.map((s) => s.jam_mulai).join(', '),
+      jadwal_kolam: slots.map((s) => s.kolam ?? '').join(', '),
+    })
+    .eq('id', muridId)
+  if (updErr) throw updErr
+}
+
+// Pecah string gabungan "Senin, Rabu" / "16:00, 16:00" / "Kolam A, Kolam A"
+// (hasil form pendaftaran multi-jadwal) jadi array slot {hari, jam_mulai, kolam}
+export const zipJadwal = (
+  hariStr?: string | null,
+  jamStr?: string | null,
+  kolamStr?: string | null
+): { hari: string; jam_mulai: string; kolam: string | null }[] => {
+  const haris = (hariStr || '').split(',').map((s) => s.trim()).filter(Boolean)
+  const jams = (jamStr || '').split(',').map((s) => s.trim()).filter(Boolean)
+  const kolams = (kolamStr || '').split(',').map((s) => s.trim()).filter(Boolean)
+  return haris.map((h, i) => ({
+    hari: h,
+    jam_mulai: jams[i] || jams[0] || '',
+    kolam: kolams[i] || kolams[0] || null,
+  }))
+}
+
+// ── Jadwal pengganti (kelas makeup 1x, tanpa ubah pola mingguan) ───────────
+
+// Semua jadwal pengganti punya 1 murid — dipakai buat isi riwayat di halaman Murid
+export const getJadwalPenggantiByMurid = async (muridId: string): Promise<JadwalPengganti[]> => {
+  const { data, error } = await supabase
+    .from('jadwal_pengganti')
+    .select('*')
+    .eq('murid_id', muridId)
+    .order('tanggal_baru', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+
+// SEMUA jadwal pengganti semua murid — dipakai di halaman Hari Ini & Jadwal buat
+// nentuin siapa yang perlu di-exclude/include di sesi tanggal tertentu
+export const getAllJadwalPengganti = async (): Promise<JadwalPengganti[]> => {
+  const { data, error } = await supabase.from('jadwal_pengganti').select('*')
+  if (error) throw error
+  return data ?? []
+}
+
+export const addJadwalPengganti = async (payload: Omit<JadwalPengganti, 'id'>): Promise<JadwalPengganti> => {
+  const { data, error } = await supabase.from('jadwal_pengganti').insert(payload).select().single()
+  if (error) throw error
+  return data
+}
+
+export const deleteJadwalPengganti = async (id: string) => {
+  const { error } = await supabase.from('jadwal_pengganti').delete().eq('id', id)
   if (error) throw error
 }
 

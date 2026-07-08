@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, Murid, JadwalSlot } from '@/lib/supabase'
-import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, HARGA_BASE, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP } from '@/lib/utils'
+import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, getMuridJadwalByMurid, replaceMuridJadwal, getJadwalPenggantiByMurid, addJadwalPengganti, deleteJadwalPengganti, Murid, JadwalSlot, MuridJadwal, JadwalPengganti } from '@/lib/supabase'
+import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, HARGA_BASE, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP, fmtShort } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
 import Avatar from '@/components/ui/Avatar'
@@ -29,12 +29,105 @@ export default function MuridPage() {
     pemilik: 'Ilham',
   })
 
+  // Bisa pilih lebih dari 1 jadwal (misal paket 8x/bulan = 2x seminggu)
+  const [jadwalPilihan, setJadwalPilihan] = useState<{ hari: string; jam_mulai: string; kolam: string }[]>([])
+  const maxJadwal = form.jumlah_sesi === 8 ? 2 : 1
+
+  const toggleJadwal = (s: JadwalSlot) => {
+    setJadwalPilihan((prev) => {
+      const exists = prev.some((p) => p.hari === s.hari && p.jam_mulai === s.jam_mulai && p.kolam === s.kolam)
+      if (exists) return prev.filter((p) => !(p.hari === s.hari && p.jam_mulai === s.jam_mulai && p.kolam === s.kolam))
+      if (prev.length >= maxJadwal) {
+        showToast(`Paket ${form.jumlah_sesi}x/bulan cuma bisa pilih ${maxJadwal} jadwal`, 'error')
+        return prev
+      }
+      return [...prev, { hari: s.hari, jam_mulai: s.jam_mulai, kolam: s.kolam }]
+    })
+  }
+
+  // ── Ganti Jadwal Minggu Ini (kelas pengganti/makeup 1x) ───────────────────
+  const [showPengganti, setShowPengganti] = useState(false)
+  const [penggantiMurid, setPenggantiMurid] = useState<Murid | null>(null)
+  const [penggantiSlotsMurid, setPenggantiSlotsMurid] = useState<MuridJadwal[]>([])
+  const [penggantiHistory, setPenggantiHistory] = useState<JadwalPengganti[]>([])
+  const [pgSlotAsalKey, setPgSlotAsalKey] = useState('')
+  const [pgTanggalAsal, setPgTanggalAsal] = useState('')
+  const [pgTanggalBaru, setPgTanggalBaru] = useState('')
+  const [pgSlotBaruKey, setPgSlotBaruKey] = useState('')
+  const [pgKeterangan, setPgKeterangan] = useState('')
+  const [pgSaving, setPgSaving] = useState(false)
+
+  const slotKey = (hari: string, jam_mulai: string, kolam: string | null) => `${hari}|${jam_mulai}|${kolam ?? ''}`
+
+  const openPengganti = async (m: Murid) => {
+    setPenggantiMurid(m)
+    setShowPengganti(true)
+    setPgSlotAsalKey(''); setPgTanggalAsal(''); setPgTanggalBaru(''); setPgSlotBaruKey(''); setPgKeterangan('')
+    try {
+      const [slots, history] = await Promise.all([getMuridJadwalByMurid(m.id), getJadwalPenggantiByMurid(m.id)])
+      setPenggantiSlotsMurid(slots)
+      setPenggantiHistory(history)
+    } catch {
+      setPenggantiSlotsMurid([]); setPenggantiHistory([])
+    }
+  }
+
+  // Nama hari dari tanggal baru yang dipilih, buat nyaring pilihan jam pengganti
+  const hariDariTanggalBaru = pgTanggalBaru
+    ? new Date(pgTanggalBaru + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long' })
+    : ''
+  const slotBaruOptions = jadwalSlots.filter((s) => s.hari === hariDariTanggalBaru)
+
+  const handleSavePengganti = async () => {
+    if (!penggantiMurid) return
+    const slotAsal = penggantiSlotsMurid.find((s) => slotKey(s.hari, s.jam_mulai, s.kolam) === pgSlotAsalKey)
+    if (!slotAsal) { showToast('Pilih jadwal asal yang mau diganti'); return }
+    if (!pgTanggalAsal) { showToast('Isi tanggal yang mau di-skip'); return }
+    if (!pgTanggalBaru) { showToast('Isi tanggal penggantinya'); return }
+    const slotBaru = slotBaruOptions.find((s) => slotKey(s.hari, s.jam_mulai, s.kolam) === pgSlotBaruKey)
+    if (!slotBaru) { showToast('Pilih jam pengganti dulu'); return }
+    setPgSaving(true)
+    try {
+      await addJadwalPengganti({
+        murid_id: penggantiMurid.id,
+        tanggal_asal: pgTanggalAsal,
+        tanggal_baru: pgTanggalBaru,
+        jam: slotBaru.jam_mulai,
+        kolam: slotBaru.kolam,
+        keterangan: pgKeterangan.trim() || null,
+      })
+      showToast('Jadwal pengganti disimpan ✓', 'success')
+      const history = await getJadwalPenggantiByMurid(penggantiMurid.id)
+      setPenggantiHistory(history)
+      setPgTanggalAsal(''); setPgTanggalBaru(''); setPgSlotBaruKey(''); setPgKeterangan('')
+    } catch (e: any) {
+      showToast('Gagal simpan: ' + e?.message, 'error')
+    } finally {
+      setPgSaving(false)
+    }
+  }
+
+  const handleDeletePengganti = async (p: JadwalPengganti) => {
+    if (!confirm('Batalkan jadwal pengganti ini? Murid balik ke jadwal asalnya di tanggal itu.')) return
+    try {
+      await deleteJadwalPengganti(p.id)
+      setPenggantiHistory((prev) => prev.filter((x) => x.id !== p.id))
+      showToast('Jadwal pengganti dibatalkan', 'success')
+    } catch (e: any) {
+      showToast('Gagal batalkan: ' + e?.message, 'error')
+    }
+  }
+
   const updateForm = (updates: Partial<typeof form>) => {
     setForm(prev => {
       const next = { ...prev, ...updates }
       next.harga = hitungHarga(next.paket, next.kategori, next.jumlah_sesi)
       return next
     })
+    if (updates.jumlah_sesi) {
+      const maxBaru = updates.jumlah_sesi === 8 ? 2 : 1
+      setJadwalPilihan((prev) => prev.slice(0, maxBaru))
+    }
   }
 
   const load = async () => {
@@ -50,13 +143,15 @@ export default function MuridPage() {
     getPemilikSuggestions().then(setPemilikSuggestions).catch(() => {})
   }, [])
 
+  const hariMurid = (m: Murid) => (m.jadwal_hari ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+
   const filtered = list.filter((m) =>
     m.nama.toLowerCase().includes(search.toLowerCase()) &&
-    (!filterHari || m.jadwal_hari === filterHari)
+    (!filterHari || hariMurid(m).includes(filterHari))
   )
 
   const hariCount = HARI_LIST.reduce<Record<string, number>>((acc, h) => {
-    acc[h] = list.filter((m) => m.jadwal_hari === h).length
+    acc[h] = list.filter((m) => hariMurid(m).includes(h)).length
     return acc
   }, {})
 
@@ -64,11 +159,12 @@ export default function MuridPage() {
     setForm({ nama: '', paket: PAKET_LIST[0], wa_ortu: '', kategori: 'normal',
       jumlah_sesi: 4, jadwal_hari: '', jadwal_jam: '', jadwal_kolam: KOLAM_PRESETS[0],
       harga: HARGA_BASE[PAKET_LIST[0]].normal, pemilik: 'Ilham' })
+    setJadwalPilihan([])
     setPakaiCustomPemilik(false)
     setEditingId(null)
   }
 
-  const openEdit = (m: Murid) => {
+  const openEdit = async (m: Murid) => {
     setEditingId(m.id)
     const pemilikMurid = m.pemilik || 'Ilham'
     setPakaiCustomPemilik(!PEMILIK_TETAP.includes(pemilikMurid))
@@ -81,19 +177,32 @@ export default function MuridPage() {
       pemilik: pemilikMurid,
     })
     setShowAdd(true)
+    // Ambil jadwal detail (multi-slot) punya murid ini dari murid_jadwal
+    try {
+      const slots = await getMuridJadwalByMurid(m.id)
+      setJadwalPilihan(slots.map((s) => ({ hari: s.hari, jam_mulai: s.jam_mulai, kolam: s.kolam ?? '' })))
+    } catch {
+      setJadwalPilihan([])
+    }
   }
 
   const handleSave = async () => {
     if (!form.nama.trim()) { showToast('Nama harus diisi'); return }
-    if (!form.jadwal_hari || !form.jadwal_jam) { showToast('Pilih jadwal hari & jam'); return }
+    if (jadwalPilihan.length === 0) { showToast('Pilih minimal 1 jadwal'); return }
+    if (jadwalPilihan.length !== maxJadwal) { showToast(`Paket ${form.jumlah_sesi}x/bulan wajib pilih ${maxJadwal} jadwal`); return }
     if (pakaiCustomPemilik && !form.pemilik.trim()) { showToast('Isi dulu nama pemiliknya'); return }
     setSaving(true)
     try {
+      const jadwalHari = jadwalPilihan.map((s) => s.hari).join(', ')
+      const jadwalJam = jadwalPilihan.map((s) => s.jam_mulai).join(', ')
+      const jadwalKolam = jadwalPilihan.map((s) => s.kolam).join(', ')
+      const payload = { ...form, jadwal_hari: jadwalHari, jadwal_jam: jadwalJam, jadwal_kolam: jadwalKolam }
       if (editingId) {
-        await updateMurid(editingId, form)
+        await updateMurid(editingId, payload)
+        await replaceMuridJadwal(editingId, jadwalPilihan)
         showToast('Murid diperbarui ✓', 'success')
       } else {
-        await addMurid(form)
+        await addMurid(payload, jadwalPilihan)
         showToast('Murid ditambahkan ✓', 'success')
       }
       setShowAdd(false); resetForm(); load()
@@ -187,6 +296,11 @@ export default function MuridPage() {
                   <i className="ti ti-brand-whatsapp text-base" />
                 </a>
               )}
+              <button onClick={() => openPengganti(m)}
+                title="Ganti Jadwal Minggu Ini"
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-yellow/10 text-text-muted hover:text-yellow transition-all">
+                <i className="ti ti-calendar-repeat text-base" />
+              </button>
               <button onClick={() => openEdit(m)}
                 className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
                 <i className="ti ti-edit text-base" />
@@ -318,9 +432,17 @@ export default function MuridPage() {
               <i className="ti ti-calendar-time text-sm" />Jadwal Tetap Mingguan
             </div>
 
-            {form.jadwal_hari && form.jadwal_jam && (
+            <div className="text-[11px] mb-2">
+              <span className={jadwalPilihan.length === maxJadwal ? 'text-blue font-semibold' : 'text-text-muted'}>
+                {maxJadwal === 2
+                  ? `Paket 8x/bulan = 2x seminggu, pilih tepat 2 jadwal (${jadwalPilihan.length}/2 dipilih)`
+                  : `Pilih 1 jadwal (${jadwalPilihan.length}/1 dipilih)`}
+              </span>
+            </div>
+
+            {jadwalPilihan.length > 0 && (
               <div className="text-[11px] text-blue mb-2">
-                Dipilih: <strong>{form.jadwal_hari} · {form.jadwal_jam}{form.jadwal_kolam ? ` · ${form.jadwal_kolam}` : ''}</strong>
+                Dipilih: <strong>{jadwalPilihan.map((s) => `${s.hari} ${s.jam_mulai}${s.kolam ? ` (${s.kolam})` : ''}`).join(', ')}</strong>
               </div>
             )}
 
@@ -337,10 +459,10 @@ export default function MuridPage() {
                   </div>
                   <div className="grid grid-cols-3 gap-1.5">
                     {slots.map((s) => {
-                      const isSelected = form.jadwal_hari === s.hari && form.jadwal_jam === s.jam_mulai && form.jadwal_kolam === s.kolam
+                      const isSelected = jadwalPilihan.some((p) => p.hari === s.hari && p.jam_mulai === s.jam_mulai && p.kolam === s.kolam)
                       return (
                         <button key={`${s.hari}-${s.jam_mulai}-${s.kolam}`}
-                          onClick={() => updateForm({ jadwal_hari: s.hari, jadwal_jam: s.jam_mulai, jadwal_kolam: s.kolam })}
+                          onClick={() => toggleJadwal(s)}
                           className={`py-1.5 px-1 rounded-md border text-[11px] font-medium transition-all ${isSelected ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
                           {s.hari.slice(0,3)} · {s.jam_mulai}
                         </button>
@@ -360,6 +482,103 @@ export default function MuridPage() {
             className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-sm font-semibold mt-1 hover:bg-[#0C447C] disabled:opacity-50 transition-all">
             {saving ? 'Menyimpan...' : (editingId ? 'Simpan Perubahan' : 'Tambah Murid')}
           </button>
+        </div>
+      </Modal>
+
+      <Modal open={showPengganti} onClose={() => setShowPengganti(false)} title={`Ganti Jadwal Minggu Ini${penggantiMurid ? ` — ${penggantiMurid.nama}` : ''}`}>
+        <div className="flex flex-col gap-3">
+          <div className="text-[12px] text-text-muted -mt-1">
+            Jadwal tetap murid gak berubah. Ini cuma buat 1x pengecualian — minggu depan otomatis balik ke jadwal aslinya.
+          </div>
+
+          {penggantiSlotsMurid.length === 0 ? (
+            <div className="text-center py-4 text-text-muted text-[12px]">
+              Murid ini belum punya jadwal tetap. Atur dulu jadwalnya lewat tombol Edit.
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="text-[12px] text-text-muted block mb-1">Jadwal asal yang mau di-skip</label>
+                <select value={pgSlotAsalKey} onChange={(e) => setPgSlotAsalKey(e.target.value)}
+                  className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text">
+                  <option value="">— Pilih jadwal —</option>
+                  {penggantiSlotsMurid.map((s) => (
+                    <option key={slotKey(s.hari, s.jam_mulai, s.kolam)} value={slotKey(s.hari, s.jam_mulai, s.kolam)}>
+                      {s.hari} {s.jam_mulai}{s.kolam ? ` (${s.kolam})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[12px] text-text-muted block mb-1">Tanggal spesifik yang di-skip</label>
+                <input type="date" value={pgTanggalAsal} onChange={(e) => setPgTanggalAsal(e.target.value)}
+                  className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+              </div>
+
+              <div className="border-t border-border my-1" />
+
+              <div>
+                <label className="text-[12px] text-text-muted block mb-1">Pindah ke tanggal</label>
+                <input type="date" value={pgTanggalBaru}
+                  onChange={(e) => { setPgTanggalBaru(e.target.value); setPgSlotBaruKey('') }}
+                  className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+              </div>
+
+              {pgTanggalBaru && (
+                <div>
+                  <label className="text-[12px] text-text-muted block mb-1">
+                    Jam pengganti — hari {hariDariTanggalBaru}
+                  </label>
+                  {slotBaruOptions.length === 0 ? (
+                    <div className="text-[12px] text-red">Gak ada kelas hari {hariDariTanggalBaru} di menu Jadwal.</div>
+                  ) : (
+                    <select value={pgSlotBaruKey} onChange={(e) => setPgSlotBaruKey(e.target.value)}
+                      className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text">
+                      <option value="">— Pilih jam —</option>
+                      {slotBaruOptions.map((s) => (
+                        <option key={slotKey(s.hari, s.jam_mulai, s.kolam)} value={slotKey(s.hari, s.jam_mulai, s.kolam)}>
+                          {s.jam_mulai}{s.kolam ? ` (${s.kolam})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="text-[12px] text-text-muted block mb-1">Keterangan (opsional)</label>
+                <input type="text" placeholder="misal: sakit, acara keluarga" value={pgKeterangan}
+                  onChange={(e) => setPgKeterangan(e.target.value)}
+                  className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+              </div>
+
+              <button onClick={handleSavePengganti} disabled={pgSaving}
+                className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-sm font-semibold hover:bg-[#0C447C] disabled:opacity-50 transition-all">
+                {pgSaving ? 'Menyimpan...' : 'Simpan Jadwal Pengganti'}
+              </button>
+            </>
+          )}
+
+          {penggantiHistory.length > 0 && (
+            <>
+              <div className="border-t border-border my-1" />
+              <div className="text-[12px] font-semibold text-text-muted">Riwayat pengganti</div>
+              <div className="flex flex-col gap-1.5">
+                {penggantiHistory.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between bg-bg-alt rounded-md px-2.5 py-1.5 text-[11px]">
+                    <div className="text-text">
+                      {fmtShort(p.tanggal_asal)} <i className="ti ti-arrow-right text-[10px]" /> {fmtShort(p.tanggal_baru)} · {p.jam}{p.kolam ? ` (${p.kolam})` : ''}
+                      {p.keterangan && <span className="text-text-muted"> — {p.keterangan}</span>}
+                    </div>
+                    <button onClick={() => handleDeletePengganti(p)} className="text-red hover:opacity-70 flex-shrink-0 ml-2">
+                      <i className="ti ti-x text-sm" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </Modal>
     </div>
