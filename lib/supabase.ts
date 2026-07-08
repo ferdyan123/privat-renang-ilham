@@ -461,6 +461,92 @@ export const getTagihanHistory = async (): Promise<(Tagihan & { murid: { nama: s
   return data as any
 }
 
+// ── Rekap Pemasukan (keuangan) ────────────────────────────────────────────
+
+const POTONGAN_REFERRAL = 100000
+
+export interface PemasukanItem {
+  id: string
+  nama: string
+  pemilik: string
+  kategori: 'baru' | 'lama'
+  tanggal: string      // created_at (baru) atau paid_at (lama)
+  totalAsli: number
+  potongan: number
+  netto: number
+}
+
+// Hitung potongan sesuai aturan: Ilham selalu full, Ibun selalu potong 100rb,
+// pemilik custom (di luar Ilham/Ibun) cuma kepotong pas transaksi "murid baru" (pendaftaran pertama).
+const hitungPotongan = (pemilik: string, kategori: 'baru' | 'lama', totalAsli: number): number => {
+  if (pemilik === 'Ilham') return 0
+  if (pemilik === 'Ibun') return Math.min(POTONGAN_REFERRAL, totalAsli)
+  // Pemilik custom (nama lain)
+  return kategori === 'baru' ? Math.min(POTONGAN_REFERRAL, totalAsli) : 0
+}
+
+// bulan format 'YYYY-MM'
+export const getRekapPemasukan = async (bulan: string): Promise<PemasukanItem[]> => {
+  const items: PemasukanItem[] = []
+
+  // Murid Baru — dari pendaftaran yang sudah di-ACC (pending_members diterima)
+  const { data: pendaftaran, error: e1 } = await supabase
+    .from('pending_members')
+    .select('id, nama_murid, pemilik, harga, created_at')
+    .eq('status', 'diterima')
+    .gte('created_at', `${bulan}-01`)
+    .lt('created_at', bulanBerikutnya(bulan))
+  if (e1) throw e1
+  ;(pendaftaran ?? []).forEach((p: any) => {
+    const pemilik = p.pemilik || 'Ilham'
+    const totalAsli = p.harga ?? 0
+    const potongan = hitungPotongan(pemilik, 'baru', totalAsli)
+    items.push({
+      id: `baru-${p.id}`, nama: p.nama_murid, pemilik, kategori: 'baru',
+      tanggal: p.created_at, totalAsli, potongan, netto: totalAsli - potongan,
+    })
+  })
+
+  // Murid Lama — dari tagihan siklus bulanan yang sudah lunas
+  const { data: tagihanLunas, error: e2 } = await supabase
+    .from('tagihan')
+    .select('id, total_harga, paid_at, murid:murid_id(nama, pemilik)')
+    .eq('status', 'lunas')
+    .gte('paid_at', `${bulan}-01`)
+    .lt('paid_at', bulanBerikutnya(bulan))
+  if (e2) throw e2
+  ;(tagihanLunas ?? []).forEach((t: any) => {
+    const pemilik = t.murid?.pemilik || 'Ilham'
+    const totalAsli = t.total_harga ?? 0
+    const potongan = hitungPotongan(pemilik, 'lama', totalAsli)
+    items.push({
+      id: `lama-${t.id}`, nama: t.murid?.nama ?? '-', pemilik, kategori: 'lama',
+      tanggal: t.paid_at, totalAsli, potongan, netto: totalAsli - potongan,
+    })
+  })
+
+  items.sort((a, b) => b.tanggal.localeCompare(a.tanggal))
+  return items
+}
+
+const bulanBerikutnya = (bulan: string): string => {
+  const [y, m] = bulan.split('-').map(Number)
+  const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+  return `${next}-01`
+}
+
+// Daftar bulan yang punya transaksi (buat dropdown filter di halaman Pemasukan)
+export const getBulanPemasukanList = async (): Promise<string[]> => {
+  const [{ data: p }, { data: t }] = await Promise.all([
+    supabase.from('pending_members').select('created_at').eq('status', 'diterima'),
+    supabase.from('tagihan').select('paid_at').eq('status', 'lunas'),
+  ])
+  const bulanSet = new Set<string>()
+  ;(p ?? []).forEach((r: any) => r.created_at && bulanSet.add(r.created_at.slice(0, 7)))
+  ;(t ?? []).forEach((r: any) => r.paid_at && bulanSet.add(r.paid_at.slice(0, 7)))
+  return Array.from(bulanSet).sort().reverse()
+}
+
 // ── Cek semua murid yang sudah siap tagih (untuk notifikasi otomatis) ─────
 export const getMuridSiapTagih = async (): Promise<{
   murid: Murid
