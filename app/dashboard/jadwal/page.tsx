@@ -137,8 +137,19 @@ export default function JadwalPage() {
           .concat(
             penggantiList
               .filter((p) => p.tanggal_baru === tglKey)
-              .map((p) => ({ mj: { id: p.id, jam_mulai: p.jam } as MuridJadwal, murid: muridList.find((m) => m.id === p.murid_id) }))
-              .filter((x): x is { mj: MuridJadwal; murid: Murid } => !!x.murid)
+              .map((p) => {
+                const murid = muridList.find((m) => m.id === p.murid_id)
+                return {
+                  mj: {
+                    id: p.id,
+                    jam_mulai: p.jam,
+                    murid_nama: murid?.nama ?? '',
+                    murid_aktif: murid?.aktif ?? true,
+                  } as MuridJadwal & { murid_nama: string; murid_aktif: boolean },
+                  murid,
+                }
+              })
+              .filter((x): x is { mj: MuridJadwal & { murid_nama: string; murid_aktif: boolean }; murid: Murid } => !!x.murid)
           )
         return (
           <div key={tglKey} className="mb-4">
