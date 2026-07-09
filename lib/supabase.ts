@@ -488,9 +488,10 @@ export interface PemasukanItem {
   nama: string
   pemilik: string
   kategori: 'baru' | 'lama'
-  tanggal: string      // created_at (baru) atau paid_at (lama)
-  totalAsli: number
-  potongan: number
+  tanggal: string
+  totalSebelumPromo: number
+  diskonPromo: number
+  kodePromo?: string | null
   netto: number
 }
 
@@ -510,7 +511,7 @@ export const getRekapPemasukan = async (bulan: string): Promise<PemasukanItem[]>
   // Murid Baru — dari pendaftaran yang sudah di-ACC (pending_members diterima)
   const { data: pendaftaran, error: e1 } = await supabase
     .from('pending_members')
-    .select('id, nama_murid, pemilik, harga, created_at')
+    .select('id, nama_murid, pemilik, harga, created_at, kode_promo, diskon')
     .eq('status', 'diterima')
     .gte('created_at', `${bulan}-01`)
     .lt('created_at', bulanBerikutnya(bulan))
@@ -518,10 +519,11 @@ export const getRekapPemasukan = async (bulan: string): Promise<PemasukanItem[]>
   ;(pendaftaran ?? []).forEach((p: any) => {
     const pemilik = p.pemilik || 'Ilham'
     const totalAsli = p.harga ?? 0
-    const potongan = hitungPotongan(pemilik, 'baru', totalAsli)
+    const diskonPromo = p.kode_promo ? (p.diskon ?? 0) : hitungPotongan(pemilik, 'baru', totalAsli)
     items.push({
       id: `baru-${p.id}`, nama: p.nama_murid, pemilik, kategori: 'baru',
-      tanggal: p.created_at, totalAsli, potongan, netto: totalAsli - potongan,
+      tanggal: p.created_at, totalSebelumPromo: totalAsli,
+      diskonPromo, kodePromo: p.kode_promo ?? null, netto: totalAsli - diskonPromo,
     })
   })
 
@@ -536,10 +538,11 @@ export const getRekapPemasukan = async (bulan: string): Promise<PemasukanItem[]>
   ;(tagihanLunas ?? []).forEach((t: any) => {
     const pemilik = t.murid?.pemilik || 'Ilham'
     const totalAsli = t.total_harga ?? 0
-    const potongan = hitungPotongan(pemilik, 'lama', totalAsli)
+    const diskonPromo = hitungPotongan(pemilik, 'lama', totalAsli)
     items.push({
       id: `lama-${t.id}`, nama: t.murid?.nama ?? '-', pemilik, kategori: 'lama',
-      tanggal: t.paid_at, totalAsli, potongan, netto: totalAsli - potongan,
+      tanggal: t.paid_at, totalSebelumPromo: totalAsli,
+      diskonPromo, kodePromo: null, netto: totalAsli - diskonPromo,
     })
   })
 
