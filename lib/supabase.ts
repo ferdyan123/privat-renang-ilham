@@ -57,6 +57,16 @@ export interface JadwalPengganti {
   keterangan: string | null
 }
 
+export interface JadwalTemplate {
+  id: string
+  hari: string        // 'Senin', 'Selasa', dst
+  jam_mulai: string   // '15:00'
+  jam_selesai: string // '16:00'
+  durasi: number
+  kolam: string
+  aktif: boolean
+}
+
 export interface PendingMember {
   id: string
   nama_murid: string
@@ -570,71 +580,85 @@ export const getMuridSiapTagih = async (): Promise<{
 
 // ── Slot Status (dari data sesi, deduplikasi hari+jam+kolam) ─────────────
 
-export interface SlotInfo {
-  hari: string
-  jam_mulai: string
-  jam_selesai: string  // estimasi jam_mulai + 60 menit
-  kolam: string
-  status: 'tersedia' | 'penuh'
-  kuota: number | null  // sisa kuota anak, null = belum pernah diisi
-}
+// ── Jadwal Template (pola mingguan tetap, tanpa tanggal) ────────────────────
 
-// Ambil semua slot unik dari sesi, gabungkan dengan status dari slot_status
-export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
-  // Ambil semua sesi
-  const { data: sesiData, error: sesiErr } = await supabase
-    .from('sesi')
-    .select('tanggal, jam, menit, durasi, kolam')
-  if (sesiErr) throw sesiErr
-
-  // Ambil status dari slot_status
-  const { data: statusData } = await supabase
-    .from('slot_status')
+export const getJadwalTemplate = async (): Promise<JadwalTemplate[]> => {
+  const { data, error } = await supabase
+    .from('jadwal_template')
     .select('*')
-  const statusMap: Record<string, 'tersedia' | 'penuh'> = {}
-  const kuotaMap: Record<string, number | null> = {}
-  ;(statusData ?? []).forEach((s: any) => {
-    const key = `${s.hari}__${s.jam_mulai}__${s.kolam}`
-    statusMap[key] = s.status
-    kuotaMap[key] = s.kuota ?? null
-  })
-
-  // Deduplikasi: ambil kombinasi unik hari+jam+kolam dari sesi
-  const HARI_ID = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu']
-  const seen = new Set<string>()
-  const slots: SlotInfo[] = []
-
-  ;(sesiData ?? []).forEach((s: any) => {
-    const d = new Date(s.tanggal + 'T00:00:00')
-    const hari = HARI_ID[d.getDay()]
-    const jam_mulai = `${s.jam}:${s.menit}`
-    // Hitung jam selesai
-    const totalMenit = parseInt(s.jam) * 60 + parseInt(s.menit) + (s.durasi ?? 60)
-    const jam_selesai = `${String(Math.floor(totalMenit/60)%24).padStart(2,'0')}:${String(totalMenit%60).padStart(2,'0')}`
-    const key = `${hari}__${jam_mulai}__${s.kolam}`
-    if (!seen.has(key)) {
-      seen.add(key)
-      slots.push({
-        hari,
-        jam_mulai,
-        jam_selesai,
-        kolam: s.kolam,
-        status: statusMap[key] ?? 'tersedia',
-        kuota: kuotaMap[key] ?? null,
-      })
-    }
-  })
-
-  // Sort: by kolam, then hari order, then jam
+    .eq('aktif', true)
+    .order('kolam')
+  if (error) throw error
   const HARI_ORDER = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu']
-  slots.sort((a, b) => {
+  return (data ?? []).sort((a: JadwalTemplate, b: JadwalTemplate) => {
     if (a.kolam !== b.kolam) return a.kolam.localeCompare(b.kolam)
     const hA = HARI_ORDER.indexOf(a.hari), hB = HARI_ORDER.indexOf(b.hari)
     if (hA !== hB) return hA - hB
     return a.jam_mulai.localeCompare(b.jam_mulai)
   })
+}
 
-  return slots
+export const addJadwalTemplate = async (
+  payload: Omit<JadwalTemplate, 'id' | 'aktif'>
+): Promise<JadwalTemplate> => {
+  const { data, error } = await supabase
+    .from('jadwal_template')
+    .insert({ ...payload, aktif: true })
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+export const updateJadwalTemplate = async (
+  id: string, payload: Partial<Omit<JadwalTemplate, 'id'>>
+): Promise<void> => {
+  const { error } = await supabase.from('jadwal_template').update(payload).eq('id', id)
+  if (error) throw error
+}
+
+export const deleteJadwalTemplate = async (id: string): Promise<void> => {
+  const { error } = await supabase.from('jadwal_template').delete().eq('id', id)
+  if (error) throw error
+}
+
+// ── Slot info (untuk form /daftar & halaman Slot) ────────────────────────────
+// Sekarang baca dari jadwal_template, bukan deduplikasi dari tabel sesi.
+
+export interface SlotInfo {
+  hari: string
+  jam_mulai: string
+  jam_selesai: string
+  kolam: string
+  status: 'tersedia' | 'penuh'
+  kuota: number | null
+}
+
+export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
+  const [templates, statusData] = await Promise.all([
+    getJadwalTemplate(),
+    supabase.from('slot_status').select('*').then(r => r.data ?? []),
+  ])
+
+  const statusMap: Record<string, 'tersedia' | 'penuh'> = {}
+  const kuotaMap: Record<string, number | null> = {}
+  ;(statusData as any[]).forEach((s) => {
+    const key = `${s.hari}__${s.jam_mulai}__${s.kolam}`
+    statusMap[key] = s.status
+    kuotaMap[key] = s.kuota ?? null
+  })
+
+  return templates.map((t) => {
+    const key = `${t.hari}__${t.jam_mulai}__${t.kolam}`
+    return {
+      hari: t.hari,
+      jam_mulai: t.jam_mulai,
+      jam_selesai: t.jam_selesai,
+      kolam: t.kolam,
+      status: statusMap[key] ?? 'tersedia',
+      kuota: kuotaMap[key] ?? null,
+    }
+  })
 }
 
 // Klik tombol "Penuh" manual → status penuh, kuota otomatis 0
