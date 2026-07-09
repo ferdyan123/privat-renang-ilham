@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { HargaSetting, DEFAULT_HARGA_SETTING } from './utils'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -20,6 +21,7 @@ export interface Murid {
   jumlah_sesi: number
   aktif: boolean
   pemilik: string
+  kelompok_adik_kakak?: string | null
 }
 
 export interface Sesi {
@@ -67,6 +69,8 @@ export interface JadwalTemplate {
   aktif: boolean
 }
 
+export interface AnakAdikKakak { nama: string; usia: number }
+
 export interface PendingMember {
   id: string
   nama_murid: string
@@ -84,6 +88,10 @@ export interface PendingMember {
   status: 'menunggu' | 'diterima' | 'ditolak'
   created_at: string
   pemilik: string | null
+  kode_promo?: string | null
+  diskon?: number
+  anak_list?: AnakAdikKakak[] | null
+  jumlah_anak?: number | null
 }
 
 // ── DB helpers ─────────────────────────────────────────────────────────────
@@ -781,5 +789,35 @@ export const pakaiPromo = async (id: string, terpakaiSekarang: number, kuota: nu
     .from('promo')
     .update({ terpakai: terpakaiBaru, aktif: terpakaiBaru < kuota })
     .eq('id', id)
+  if (error) throw error
+}
+
+// ── Setting Harga (admin-editable, dipakai form pendaftaran & halaman Slot) ─
+
+export const getHargaSetting = async (): Promise<HargaSetting> => {
+  const { data, error } = await supabase
+    .from('harga_setting')
+    .select('*')
+    .eq('id', 'default')
+    .maybeSingle()
+  if (error) {
+    // Tabel belum ada / belum di-migrate — fallback ke default biar gak crash
+    return DEFAULT_HARGA_SETTING
+  }
+  if (!data) return DEFAULT_HARGA_SETTING
+  return {
+    semi_privat_normal: data.semi_privat_normal ?? DEFAULT_HARGA_SETTING.semi_privat_normal,
+    semi_privat_abk: data.semi_privat_abk ?? DEFAULT_HARGA_SETTING.semi_privat_abk,
+    eksklusif_normal: data.eksklusif_normal ?? DEFAULT_HARGA_SETTING.eksklusif_normal,
+    eksklusif_abk: data.eksklusif_abk ?? DEFAULT_HARGA_SETTING.eksklusif_abk,
+    adik_kakak_normal: data.adik_kakak_normal ?? DEFAULT_HARGA_SETTING.adik_kakak_normal,
+    adik_kakak_abk: data.adik_kakak_abk ?? DEFAULT_HARGA_SETTING.adik_kakak_abk,
+  }
+}
+
+export const updateHargaSetting = async (setting: HargaSetting) => {
+  const { error } = await supabase
+    .from('harga_setting')
+    .upsert({ id: 'default', ...setting, updated_at: new Date().toISOString() })
   if (error) throw error
 }

@@ -32,16 +32,54 @@ export const PAKET_LIST = [
   'Eksklusif',
 ]
 
-// Harga berdasarkan paket + kategori + jumlah sesi
-// Base harga untuk 4x/bulan
-export const HARGA_BASE: Record<string, Record<string, number>> = {
-  'Semi Privat': { normal: 500000, abk: 600000 },
-  'Eksklusif':   { normal: 1000000, abk: 1200000 },
+// Paket khusus di form pendaftaran publik (termasuk Adik Kakak)
+export const PAKET_LIST_PUBLIK = [
+  'Semi Privat',
+  'Eksklusif',
+  'Adik Kakak',
+]
+
+export const ADIK_KAKAK_MIN = 2
+export const ADIK_KAKAK_MAX = 5
+export const POTONGAN_ADIK_KAKAK = 100000 // potongan per anak (flat)
+
+// Setting harga — sumber kebenarannya di tabel `harga_setting` Supabase (admin-editable).
+// Ini cuma default/fallback kalau tabel belum sempat diisi.
+export interface HargaSetting {
+  semi_privat_normal: number
+  semi_privat_abk: number
+  eksklusif_normal: number
+  eksklusif_abk: number
+  adik_kakak_normal: number  // per anak
+  adik_kakak_abk: number     // per anak
 }
 
-export const hitungHarga = (paket: string, kategori: string, jumlahSesi: number): number => {
-  const base = HARGA_BASE[paket]?.[kategori === 'abk' ? 'abk' : 'normal'] ?? 0
-  return base * (jumlahSesi === 8 ? 2 : 1)
+export const DEFAULT_HARGA_SETTING: HargaSetting = {
+  semi_privat_normal: 500000,
+  semi_privat_abk: 600000,
+  eksklusif_normal: 1000000,
+  eksklusif_abk: 1200000,
+  adik_kakak_normal: 500000,
+  adik_kakak_abk: 600000,
+}
+
+// Harga paket biasa (Semi Privat / Eksklusif) berdasarkan setting + kategori + jumlah sesi
+export const hitungHarga = (setting: HargaSetting, paket: string, kategori: string, jumlahSesi: number): number => {
+  const multiplier = jumlahSesi === 8 ? 2 : 1
+  const isAbk = kategori === 'abk'
+  if (paket === 'Semi Privat') return (isAbk ? setting.semi_privat_abk : setting.semi_privat_normal) * multiplier
+  if (paket === 'Eksklusif') return (isAbk ? setting.eksklusif_abk : setting.eksklusif_normal) * multiplier
+  return 0
+}
+
+// Harga paket Adik Kakak: (harga per anak × jumlah sesi) × jumlah anak, dipotong flat 100rb/anak
+export const hitungHargaAdikKakak = (setting: HargaSetting, kategori: string, jumlahAnak: number, jumlahSesi: number): number => {
+  const multiplier = jumlahSesi === 8 ? 2 : 1
+  const isAbk = kategori === 'abk'
+  const hargaPerAnak = (isAbk ? setting.adik_kakak_abk : setting.adik_kakak_normal) * multiplier
+  const totalSebelumPotongan = hargaPerAnak * jumlahAnak
+  const totalPotongan = POTONGAN_ADIK_KAKAK * jumlahAnak
+  return Math.max(0, totalSebelumPotongan - totalPotongan)
 }
 
 export const fmtRupiah = (nominal: number): string =>
@@ -98,3 +136,16 @@ export const PEMILIK_TETAP = ['Ilham', 'Ibun']
 // beda tag pelacakan, bukan beda rekening.
 export const getRekeningByPemilik = (pemilik?: string | null): RekeningInfo =>
   pemilik === 'Ibun' ? REKENING_IBUN : REKENING_ILHAM
+
+// ── Peraturan Sesi Privat ─────────────────────────────────────────────────
+// Ditampilkan di bagian bawah form pembayaran (pendaftaran baru & murid lama)
+export const PERATURAN_SESI: string[] = [
+  'Paket privat berlaku untuk 44 hari (sekitar 1 bulan 14 hari) sejak sesi pertama dimulai.',
+  'Seluruh sesi privat harus diselesaikan dalam masa berlaku tersebut.',
+  'Apabila masa berlaku telah melewati 44 hari, maka sisa sesi yang belum digunakan akan dianggap hangus.',
+  'Pengecualian diberikan apabila siswa sakit. Orang tua/wali diharapkan menginformasikan kondisi tersebut kepada coach, sehingga masa berlaku dapat diperpanjang sesuai kebijakan.',
+  'Jika siswa berhalangan hadir (dengan pemberitahuan sebelumnya), maka sesi dapat diganti (reschedule) pada minggu berikutnya.',
+  'Jadwal pengganti akan disesuaikan dengan ketersediaan jadwal coach serta kesepakatan dengan orang tua/wali.',
+  'Untuk paket kakak beradik, apabila pada jadwal privat hanya satu anak yang hadir sementara anak lainnya tidak hadir, maka keduanya tetap akan dianggap hadir dan absensi pada pertemuan tersebut akan dihitung untuk kedua siswa.',
+  'Demi kelancaran proses belajar, mohon memberikan konfirmasi ketidakhadiran atau permohonan reschedule sebelum jadwal privat berlangsung.',
+]

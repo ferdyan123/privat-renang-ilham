@@ -61,18 +61,43 @@ export default function DaftarPage() {
         kolam: s.kolam || kolamFallback,
       }))
 
-      await addMurid({
-        nama: d.nama_murid,
-        paket: d.paket,
-        wa_ortu: d.wa_ortu,
-        kategori: 'normal',
-        jadwal_hari: d.jadwal_hari,
-        jadwal_jam: d.jadwal_jam,
-        jadwal_kolam: jadwalList[0]?.kolam ?? '',
-        harga: d.harga ?? 0,
-        jumlah_sesi: d.jumlah_sesi ?? 4,
-        pemilik: d.pemilik || 'Ilham',
-      }, jadwalList)
+      // Kategori (normal/abk) disimpan sebagai teks "+ABK" di dalam string paket, bukan kolom terpisah
+      const kategoriFinal: 'normal' | 'abk' = d.paket.includes('+ABK') ? 'abk' : 'normal'
+
+      if (d.anak_list && d.anak_list.length > 1) {
+        // Paket Adik Kakak: buat 1 murid PER ANAK, harga total dibagi rata ke tiap anak
+        // supaya sistem tagihan bulanan (1 tagihan = 1 murid) tetap jalan tanpa perlu diubah.
+        const jumlahAnak = d.anak_list.length
+        const hargaPerAnak = Math.round((d.harga ?? 0) / jumlahAnak)
+        for (const anak of d.anak_list) {
+          await addMurid({
+            nama: anak.nama,
+            paket: d.paket,
+            wa_ortu: d.wa_ortu,
+            kategori: kategoriFinal,
+            jadwal_hari: d.jadwal_hari,
+            jadwal_jam: d.jadwal_jam,
+            jadwal_kolam: jadwalList[0]?.kolam ?? '',
+            harga: hargaPerAnak,
+            jumlah_sesi: d.jumlah_sesi ?? 4,
+            pemilik: d.pemilik || 'Ilham',
+            kelompok_adik_kakak: d.id,
+          }, jadwalList)
+        }
+      } else {
+        await addMurid({
+          nama: d.nama_murid,
+          paket: d.paket,
+          wa_ortu: d.wa_ortu,
+          kategori: kategoriFinal,
+          jadwal_hari: d.jadwal_hari,
+          jadwal_jam: d.jadwal_jam,
+          jadwal_kolam: jadwalList[0]?.kolam ?? '',
+          harga: d.harga ?? 0,
+          jumlah_sesi: d.jumlah_sesi ?? 4,
+          pemilik: d.pemilik || 'Ilham',
+        }, jadwalList)
+      }
       showToast(`${d.nama_murid} diterima ✓`, 'success')
       loadPendaftaran()
     } catch { showToast('Gagal acc', 'error') }

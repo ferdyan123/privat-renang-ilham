@@ -37,18 +37,12 @@ export default function PemasukanPage() {
   const muridBaru = items.filter((i) => i.kategori === 'baru')
   const muridLama = items.filter((i) => i.kategori === 'lama')
 
-  const sum = (list: PemasukanItem[], key: 'totalAsli' | 'potongan' | 'netto') =>
+  const sum = (list: PemasukanItem[], key: 'totalSebelumPromo' | 'diskonPromo' | 'netto') =>
     list.reduce((s, x) => s + x[key], 0)
 
   const totalNetto = sum(items, 'netto')
-  const totalPotongan = sum(items, 'potongan')
-  const totalAsli = sum(items, 'totalAsli')
-
-  const pemilikBadge = (pemilik: string) => {
-    if (pemilik === 'Ilham') return 'bg-blue/10 text-blue'
-    if (pemilik === 'Ibun') return 'bg-yellow/10 text-yellow'
-    return 'bg-purple-100 text-purple-600'
-  }
+  const totalDiskonPromo = sum(items, 'diskonPromo')
+  const totalSebelumPromo = sum(items, 'totalSebelumPromo')
 
   const Grup = ({ title, list, kategori }: { title: string; list: PemasukanItem[]; kategori: 'baru' | 'lama' }) => (
     <div className="mb-5">
@@ -70,30 +64,20 @@ export default function PemasukanPage() {
       <div className="flex flex-col gap-2">
         {list.map((it) => (
           <div key={it.id} className="bg-bg border border-border rounded-lg px-3.5 py-2.5 shadow-sm">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center justify-between mb-1">
               <span className="text-[13px] font-semibold text-text flex-1 truncate">{it.nama}</span>
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${pemilikBadge(it.pemilik)}`}>
-                {it.pemilik}
-              </span>
+              <strong className="text-text text-[13px]">{fmtRupiah(it.netto)}</strong>
             </div>
             <div className="flex items-center justify-between text-[12px]">
               <span className="text-text-muted">
                 {new Date(it.tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
               </span>
-              {it.potongan > 0 ? (
-                <span className="text-right">
-                  <span className="line-through text-text-muted/60 mr-1.5">{fmtRupiah(it.totalAsli)}</span>
-                  <strong className="text-text">{fmtRupiah(it.netto)}</strong>
+              {it.diskonPromo > 0 && (
+                <span className="text-[10.5px] font-semibold text-blue bg-blue/10 px-2 py-0.5 rounded-full">
+                  Promo {it.kodePromo} -{fmtRupiah(it.diskonPromo)}
                 </span>
-              ) : (
-                <strong className="text-text">{fmtRupiah(it.netto)}</strong>
               )}
             </div>
-            {it.potongan > 0 && (
-              <div className="text-[10.5px] text-red mt-0.5">
-                {it.pemilik} : {fmtRupiah(it.netto)} (asli {fmtRupiah(it.totalAsli)}, dipotong {fmtRupiah(it.potongan)})
-              </div>
-            )}
           </div>
         ))}
       </div>
@@ -117,9 +101,9 @@ export default function PemasukanPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-2 mb-5">
         {[
-          { label: 'Pemasukan Kotor', val: fmtRupiah(totalAsli), color: 'text-text' },
-          { label: 'Total Potongan', val: fmtRupiah(totalPotongan), color: 'text-red' },
-          { label: 'Pemasukan Bersih', val: fmtRupiah(totalNetto), color: 'text-green' },
+          { label: 'Harga Normal', val: fmtRupiah(totalSebelumPromo), color: 'text-text' },
+          { label: 'Diskon Promo', val: fmtRupiah(totalDiskonPromo), color: 'text-blue' },
+          { label: 'Pemasukan Diterima', val: fmtRupiah(totalNetto), color: 'text-green' },
         ].map((c) => (
           <div key={c.label} className="bg-bg border border-border rounded-lg p-3 text-center shadow-sm">
             <div className={`text-[13px] font-bold ${c.color}`}>{c.val}</div>

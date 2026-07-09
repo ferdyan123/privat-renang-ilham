@@ -1,13 +1,14 @@
 'use client'
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { supabase, getJadwalSlot, JadwalSlot, adaPromoAktif, validasiPromo, pakaiPromo, PromoInfo } from '@/lib/supabase'
-import { HARGA_BASE, hitungHarga, fmtRupiah, getRekeningByPemilik } from '@/lib/utils'
+import { supabase, getJadwalSlot, JadwalSlot, adaPromoAktif, validasiPromo, pakaiPromo, PromoInfo, getHargaSetting } from '@/lib/supabase'
+import { DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, hitungHargaAdikKakak, ADIK_KAKAK_MIN, ADIK_KAKAK_MAX, POTONGAN_ADIK_KAKAK, PERATURAN_SESI, fmtRupiah, getRekeningByPemilik } from '@/lib/utils'
 import { ToastProvider, showToast } from '@/components/ui/Toast'
 
 const KELAS_LIST = [
   { id: 'semi_privat', label: 'Semi Privat', desc: 'Belajar bersama 2-3 anak seusia' },
   { id: 'eksklusif', label: 'Eksklusif', desc: 'Sesi khusus 1-on-1 dengan instruktur' },
+  { id: 'adik_kakak', label: 'Adik Kakak', desc: '2-5 bersaudara sekaligus, hemat per anak' },
 ]
 
 // Hari & jam diambil dari jadwal_slot Supabase
@@ -50,6 +51,12 @@ function DaftarPublikPageContent() {
   const [jadwalSlots, setJadwalSlots] = useState<JadwalSlot[]>([])
   const [buktiFile, setBuktiFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
+  const [hargaSetting, setHargaSetting] = useState<HargaSetting>(DEFAULT_HARGA_SETTING)
+
+  // Paket Adik Kakak — anak pertama pakai form.nama_murid/form.usia (Step Biodata),
+  // anak ke-2 dst diisi di sini (dinamis, 1-4 anak tambahan → total 2-5 anak).
+  const [jumlahAnakAdikKakak, setJumlahAnakAdikKakak] = useState(2)
+  const [anakTambahan, setAnakTambahan] = useState<{ nama: string; usia: string }[]>([{ nama: '', usia: '' }])
 
   // Kode referral
   const [showPromoBox, setShowPromoBox] = useState(false)
@@ -93,17 +100,34 @@ function DaftarPublikPageContent() {
   const jadwalJamGabungan = jadwalPilihan.map((s) => s.jam_mulai).join(', ')
   const jadwalRingkas = jadwalPilihan.map((s) => `${s.hari} ${s.jam_mulai} (${s.kolam})`).join(', ')
 
+  // Ganti jumlah anak adik kakak → resize array input nama/usia anak tambahan
+  const ubahJumlahAnak = (n: number) => {
+    const jumlah = Math.min(ADIK_KAKAK_MAX, Math.max(ADIK_KAKAK_MIN, n))
+    setJumlahAnakAdikKakak(jumlah)
+    setAnakTambahan((prev) => {
+      const target = jumlah - 1
+      if (prev.length === target) return prev
+      if (prev.length < target) return [...prev, ...Array(target - prev.length).fill({ nama: '', usia: '' })]
+      return prev.slice(0, target)
+    })
+  }
+
+  const upAnakTambahan = (idx: number, field: 'nama' | 'usia', val: string) => {
+    setAnakTambahan((prev) => prev.map((a, i) => (i === idx ? { ...a, [field]: val } : a)))
+  }
+
   const up = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   useEffect(() => {
     getJadwalSlot().then(setJadwalSlots).catch(() => {})
     adaPromoAktif().then(setShowPromoBox).catch(() => {})
+    getHargaSetting().then(setHargaSetting).catch(() => {})
   }, [])
 
   // Hitung harga berdasarkan pilihan
-  const hargaSekarang = form.paket && form.kategori
-    ? hitungHarga(form.paket, form.kategori, parseInt(form.jumlah_sesi))
-    : 0
+  const hargaSekarang = form.paket === 'Adik Kakak'
+    ? (form.kategori ? hitungHargaAdikKakak(hargaSetting, form.kategori, jumlahAnakAdikKakak, parseInt(form.jumlah_sesi)) : 0)
+    : (form.paket && form.kategori ? hitungHarga(hargaSetting, form.paket, form.kategori, parseInt(form.jumlah_sesi)) : 0)
 
   const diskonAktif = promoValid ? Math.min(promoValid.diskon_nominal, hargaSekarang) : 0
   const totalSetelahDiskon = Math.max(0, hargaSekarang - diskonAktif)
@@ -128,7 +152,13 @@ function DaftarPublikPageContent() {
 
   const stepValid = () => {
     if (step === 0) return form.nama_murid.trim() && form.usia && form.jenis_kelamin && form.kategori && form.nama_ortu.trim() && form.wa_ortu.trim()
-    if (step === 1) return form.paket && form.jumlah_sesi && jadwalPilihan.length === maxJadwal
+    if (step === 1) {
+      if (!form.paket || !form.jumlah_sesi || jadwalPilihan.length !== maxJadwal) return false
+      if (form.paket === 'Adik Kakak') {
+        return anakTambahan.every((a) => a.nama.trim() && a.usia)
+      }
+      return true
+    }
     return true
   }
 
@@ -152,12 +182,18 @@ function DaftarPublikPageContent() {
         const { data } = supabase.storage.from('bukti-tf').getPublicUrl(path)
         bukti_tf_url = data.publicUrl
       }
+      const isAdikKakak = form.paket === 'Adik Kakak'
+      const anakList = isAdikKakak
+        ? [{ nama: form.nama_murid, usia: parseInt(form.usia) }, ...anakTambahan.map((a) => ({ nama: a.nama, usia: parseInt(a.usia) }))]
+        : null
+      const namaMuridFinal = isAdikKakak ? anakList!.map((a) => a.nama).join(' & ') : form.nama_murid
+
       const { error } = await supabase.from('pending_members').insert({
-        nama_murid: form.nama_murid,
+        nama_murid: namaMuridFinal,
         usia: parseInt(form.usia),
         nama_ortu: form.nama_ortu,
         wa_ortu: form.wa_ortu,
-        paket: form.paket + (form.kategori === 'abk' ? ' +ABK' : '') + ' ' + form.jumlah_sesi + 'x',
+        paket: form.paket + (form.kategori === 'abk' ? ' +ABK' : '') + ' ' + form.jumlah_sesi + 'x' + (isAdikKakak ? ` (${jumlahAnakAdikKakak} anak)` : ''),
         jadwal_hari: jadwalHariGabungan,
         jadwal_jam: jadwalJamGabungan,
         jadwal_kolam: jadwalPilihan.map((s) => s.kolam).join(', '),
@@ -167,6 +203,8 @@ function DaftarPublikPageContent() {
         harga: totalSetelahDiskon,
         kode_promo: promoValid?.kode ?? null,
         diskon: diskonAktif,
+        anak_list: anakList,
+        jumlah_anak: isAdikKakak ? jumlahAnakAdikKakak : 1,
         status: 'menunggu',
         pemilik,
       })
@@ -190,18 +228,27 @@ function DaftarPublikPageContent() {
         <img key={i} src={il.src} alt="" className="absolute pointer-events-none select-none"
           style={{ ...il.style as any, position: 'fixed' }} />
       ))}
-      <div className="relative z-10 bg-white rounded-2xl p-8 text-center max-w-sm w-full shadow-md">
+      <div className="relative z-10 bg-white rounded-2xl p-8 text-center max-w-md w-full shadow-md">
         <div className="text-5xl mb-3">🎉</div>
         <div className="text-[20px] font-bold text-gray-800 mb-2">Pendaftaran Berhasil!</div>
         <div className="text-[14px] text-gray-500 mb-4">
           Halo <strong>{form.nama_ortu}</strong>!<br/>
-          Pendaftaran <strong>{form.nama_murid}</strong> sudah kami terima dengan baik.
+          Pendaftaran <strong>{form.paket === 'Adik Kakak' ? [form.nama_murid, ...anakTambahan.map(a=>a.nama)].filter(Boolean).join(', ') : form.nama_murid}</strong> sudah kami terima dengan baik.
         </div>
         <div className="bg-[#E6F4FB] rounded-xl p-4 text-left text-[13px] text-gray-600 mb-4 space-y-1">
           <div className="font-semibold text-[#185FA5] mb-1.5">Ringkasan Pendaftaran</div>
           <div>Kelas: <strong>{form.paket} ({form.jumlah_sesi}x/bulan)</strong></div>
           <div>Jadwal: <strong>{jadwalPilihan.map((s) => `${s.hari} ${s.jam_mulai}`).join(', ')}</strong></div>
           <div>Kategori: <strong>{form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'}</strong></div>
+        </div>
+        {/* Peraturan Sesi Privat — muncul setelah pendaftaran+bukti TF terkirim */}
+        <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 text-left mb-4">
+          <div className="text-[12px] font-bold text-gray-700 mb-2 flex items-center gap-1.5">
+            <i className="ti ti-file-text text-sm" />Peraturan Sesi Privat
+          </div>
+          <ol className="text-[11px] text-gray-500 leading-relaxed list-decimal list-inside space-y-1">
+            {PERATURAN_SESI.map((p, i) => <li key={i}>{p}</li>)}
+          </ol>
         </div>
         <div className="text-[12px] text-gray-400 leading-relaxed">
           Admin akan menghubungi melalui WhatsApp untuk konfirmasi.<br/>
@@ -382,10 +429,48 @@ function DaftarPublikPageContent() {
                         <div className="text-[10px] opacity-60">{n === '8' ? '2x seminggu · pilih 2 jadwal' : '1x seminggu · pilih 1 jadwal'}</div>
                         {form.kategori && form.paket && (
                           <div className="text-[11px] mt-0.5 opacity-70">
-                            {fmtRupiah(hitungHarga(form.paket, form.kategori, parseInt(n)))}
+                            {form.paket === 'Adik Kakak'
+                              ? fmtRupiah(hitungHargaAdikKakak(hargaSetting, form.kategori, jumlahAnakAdikKakak, parseInt(n)))
+                              : fmtRupiah(hitungHarga(hargaSetting, form.paket, form.kategori, parseInt(n)))}
                           </div>
                         )}
                       </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Adik Kakak: jumlah anak + input nama & usia anak ke-2 dst */}
+              {form.paket === 'Adik Kakak' && (
+                <div className="bg-[#FFF8E8] border border-yellow-200 rounded-xl p-3.5">
+                  <div className="text-[13px] font-bold text-gray-800 mb-1">👨‍👩‍👧‍👦 Jumlah Anak</div>
+                  <div className="text-[11px] text-gray-500 mb-2.5">Min {ADIK_KAKAK_MIN}, maks {ADIK_KAKAK_MAX} anak. Dapat potongan Rp{POTONGAN_ADIK_KAKAK.toLocaleString('id-ID')}/anak.</div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <button onClick={() => ubahJumlahAnak(jumlahAnakAdikKakak - 1)} disabled={jumlahAnakAdikKakak <= ADIK_KAKAK_MIN}
+                      className="w-8 h-8 rounded-lg border border-gray-200 flex items-center justify-center text-gray-500 disabled:opacity-30">
+                      <i className="ti ti-minus text-sm" />
+                    </button>
+                    <div className="flex-1 text-center text-[15px] font-bold text-gray-800">{jumlahAnakAdikKakak} anak</div>
+                    <button onClick={() => ubahJumlahAnak(jumlahAnakAdikKakak + 1)} disabled={jumlahAnakAdikKakak >= ADIK_KAKAK_MAX}
+                      className="w-8 h-8 rounded-lg border border-gray-200 flex items-center justify-center text-gray-500 disabled:opacity-30">
+                      <i className="ti ti-plus text-sm" />
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] font-semibold text-gray-500 mb-1.5">
+                    Anak 1: <span className="text-gray-700">{form.nama_murid || '(diisi di Step Biodata)'}</span>, {form.usia || '?'} tahun
+                  </div>
+
+                  <div className="flex flex-col gap-2.5">
+                    {anakTambahan.map((a, i) => (
+                      <div key={i} className="grid grid-cols-3 gap-2">
+                        <input placeholder={`Nama anak ${i + 2}`} value={a.nama}
+                          onChange={(e) => upAnakTambahan(i, 'nama', e.target.value)}
+                          className="col-span-2 border border-gray-200 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-800 focus:outline-none focus:border-[#185FA5]" />
+                        <input placeholder="Usia" type="number" value={a.usia}
+                          onChange={(e) => upAnakTambahan(i, 'usia', e.target.value)}
+                          className="border border-gray-200 rounded-lg px-2.5 py-2 text-[12.5px] text-gray-800 focus:outline-none focus:border-[#185FA5]" />
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -524,8 +609,10 @@ function DaftarPublikPageContent() {
                 <div className="text-[11px] font-semibold text-[#185FA5] uppercase tracking-wide mb-2">Ringkasan</div>
                 <div className="space-y-1 text-[12px]">
                   {[
-                    ['Nama', form.nama_murid],
-                    ['Kelas', form.paket],
+                    ['Nama', form.paket === 'Adik Kakak'
+                      ? [form.nama_murid, ...anakTambahan.map((a) => a.nama)].filter(Boolean).join(', ')
+                      : form.nama_murid],
+                    ['Kelas', form.paket === 'Adik Kakak' ? `Adik Kakak (${jumlahAnakAdikKakak} anak)` : form.paket],
                     ['Sesi', form.jumlah_sesi + 'x/bulan'],
                     ['Kategori', form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'],
                     ['Jadwal', jadwalPilihan.map((s) => `${s.hari} ${s.jam_mulai}`).join(', ')],

@@ -349,13 +349,13 @@ export default function JadwalPage() {
             const idsPindahKeluar = new Set(penggantiList.filter((p) => p.tanggal_asal === tglKey).map((p) => p.murid_id))
             const muridHariIni = muridJadwalList
               .filter((mj) => mj.murid_aktif && mj.hari.toLowerCase() === hariSesi.toLowerCase() && !idsPindahKeluar.has(mj.murid_id))
-              .map((mj) => ({ mj, murid: muridList.find((m) => m.id === mj.murid_id) }))
-              .filter((x): x is { mj: typeof x.mj; murid: Murid } => !!x.murid)
+              .map((mj) => ({ mj: { id: mj.id, jam_mulai: mj.jam_mulai }, murid: muridList.find((m) => m.id === mj.murid_id) }))
+              .filter((x): x is { mj: { id: string; jam_mulai: string }; murid: Murid } => !!x.murid)
               .concat(
                 penggantiList
                   .filter((p) => p.tanggal_baru === tglKey)
-                  .map((p) => ({ mj: { id: p.id, jam_mulai: p.jam } as MuridJadwal, murid: muridList.find((m) => m.id === p.murid_id) }))
-                  .filter((x): x is { mj: MuridJadwal; murid: Murid } => !!x.murid)
+                  .map((p) => ({ mj: { id: p.id, jam_mulai: p.jam }, murid: muridList.find((m) => m.id === p.murid_id) }))
+                  .filter((x): x is { mj: { id: string; jam_mulai: string }; murid: Murid } => !!x.murid)
               )
             return (
               <div key={tglKey} className="mb-4">

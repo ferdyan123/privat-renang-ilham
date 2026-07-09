@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getSlotDariJadwal, setSlotPenuh, setSlotTersedia, setSlotKuota, getPemilikSuggestions, SlotInfo } from '@/lib/supabase'
-import { PEMILIK_TETAP } from '@/lib/utils'
+import { getSlotDariJadwal, setSlotPenuh, setSlotTersedia, setSlotKuota, getPemilikSuggestions, getHargaSetting, updateHargaSetting, SlotInfo } from '@/lib/supabase'
+import { PEMILIK_TETAP, HargaSetting, DEFAULT_HARGA_SETTING, formatRibuan, parseRibuan } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 
 export default function SlotPage() {
@@ -17,6 +17,52 @@ export default function SlotPage() {
   const [customInput, setCustomInput] = useState('')
   const [pemilikSuggestions, setPemilikSuggestions] = useState<string[]>([])
 
+  // Setting harga (admin-editable, tersimpan di Supabase)
+  const [hargaSetting, setHargaSetting] = useState<HargaSetting>(DEFAULT_HARGA_SETTING)
+  const [hargaForm, setHargaForm] = useState<Record<string, string>>({})
+  const [savingHarga, setSavingHarga] = useState(false)
+  const [hargaBerubah, setHargaBerubah] = useState(false)
+
+  const loadHarga = async () => {
+    try {
+      const s = await getHargaSetting()
+      setHargaSetting(s)
+      setHargaForm({
+        semi_privat_normal: formatRibuan(s.semi_privat_normal),
+        semi_privat_abk: formatRibuan(s.semi_privat_abk),
+        eksklusif_normal: formatRibuan(s.eksklusif_normal),
+        eksklusif_abk: formatRibuan(s.eksklusif_abk),
+        adik_kakak_normal: formatRibuan(s.adik_kakak_normal),
+        adik_kakak_abk: formatRibuan(s.adik_kakak_abk),
+      })
+      setHargaBerubah(false)
+    } catch { showToast('Gagal load setting harga', 'error') }
+  }
+
+  const ubahHargaForm = (key: string, val: string) => {
+    setHargaForm(prev => ({ ...prev, [key]: formatRibuan(val) }))
+    setHargaBerubah(true)
+  }
+
+  const simpanHarga = async () => {
+    setSavingHarga(true)
+    try {
+      const next: HargaSetting = {
+        semi_privat_normal: parseRibuan(hargaForm.semi_privat_normal),
+        semi_privat_abk: parseRibuan(hargaForm.semi_privat_abk),
+        eksklusif_normal: parseRibuan(hargaForm.eksklusif_normal),
+        eksklusif_abk: parseRibuan(hargaForm.eksklusif_abk),
+        adik_kakak_normal: parseRibuan(hargaForm.adik_kakak_normal),
+        adik_kakak_abk: parseRibuan(hargaForm.adik_kakak_abk),
+      }
+      await updateHargaSetting(next)
+      setHargaSetting(next)
+      setHargaBerubah(false)
+      showToast('Harga tersimpan ✓ Berlaku buat pendaftaran baru mulai sekarang', 'success')
+    } catch (e: any) { showToast('Gagal simpan harga: ' + e?.message, 'error') }
+    finally { setSavingHarga(false) }
+  }
+
   const load = async () => {
     setLoading(true)
     try { setSlots(await getSlotDariJadwal()) }
@@ -27,6 +73,7 @@ export default function SlotPage() {
   useEffect(() => {
     load()
     getPemilikSuggestions().then(setPemilikSuggestions).catch(() => {})
+    loadHarga()
   }, [])
 
   const slotKey = (slot: SlotInfo) => `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
@@ -126,6 +173,51 @@ export default function SlotPage() {
           <div className="text-[18px] font-bold text-red">{penuhCount}</div>
           <div className="text-[11px] text-text-muted">Penuh</div>
         </div>
+      </div>
+
+      {/* Atur Harga — admin-editable, kesimpen persist di Supabase */}
+      <div className="bg-bg border border-border rounded-lg px-4 py-3 mb-4">
+        <div className="text-[13px] font-bold text-text mb-2 flex items-center gap-1.5">
+          <i className="ti ti-tag text-sm" />Atur Harga (per 4x/bulan)
+        </div>
+        <div className="text-[11px] text-text-muted mb-3">
+          Harga ini yang dipakai form pendaftaran. Kalau diubah, murid yang <strong>udah kadung daftar tetap kekunci</strong> di harga lama —
+          cuma pendaftaran baru yang kena harga terbaru. 8x/bulan otomatis 2× lipat dari harga ini.
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+          {[
+            ['semi_privat_normal', 'Semi Privat · Normal'],
+            ['semi_privat_abk', 'Semi Privat · ABK'],
+            ['eksklusif_normal', 'Eksklusif · Normal'],
+            ['eksklusif_abk', 'Eksklusif · ABK'],
+            ['adik_kakak_normal', 'Adik Kakak · Normal (per anak)'],
+            ['adik_kakak_abk', 'Adik Kakak · ABK (per anak)'],
+          ].map(([key, label]) => (
+            <div key={key}>
+              <label className="text-[10.5px] text-text-muted block mb-1">{label}</label>
+              <div className="flex items-center border border-border rounded-md overflow-hidden focus-within:border-blue">
+                <span className="px-2 text-[12px] text-text-muted bg-bg-2">Rp</span>
+                <input
+                  value={hargaForm[key] ?? ''}
+                  onChange={(e) => ubahHargaForm(key, e.target.value)}
+                  inputMode="numeric"
+                  className="flex-1 px-2 py-1.5 text-[13px] text-text focus:outline-none min-w-0"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="text-[10.5px] text-text-muted mt-2.5">
+          Adik Kakak dapat potongan flat <strong>Rp 100.000/anak</strong> (2–5 anak). Contoh: 2 anak @Rp500rb = harusnya 1jt, jadi Rp800rb.
+        </div>
+
+        <button onClick={simpanHarga} disabled={savingHarga || !hargaBerubah}
+          className="w-full mt-3 bg-[#185FA5] text-white rounded-md py-2 text-[13px] font-semibold hover:bg-[#0C447C] transition-all disabled:opacity-40 flex items-center justify-center gap-2">
+          {savingHarga ? <i className="ti ti-loader-2 animate-spin text-base" /> : <i className="ti ti-device-floppy text-base" />}
+          {hargaBerubah ? 'Simpan Harga' : 'Tersimpan'}
+        </button>
       </div>
 
       {/* Pemilik rekening tujuan link pendaftaran */}

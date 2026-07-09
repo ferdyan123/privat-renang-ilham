@@ -2,7 +2,7 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { fmtShort } from '@/lib/utils'
+import { fmtShort, PERATURAN_SESI } from '@/lib/utils'
 
 const REKENING = {
   nama: 'Muhammad Nurilham Aulia Rahman',
@@ -423,6 +423,16 @@ function KartuContent() {
             )}
           </div>
         )}
+
+        {/* Peraturan Sesi Privat */}
+        <div className="bg-gray-50 border border-gray-100 rounded-xl p-4">
+          <div className="text-[13px] font-bold text-gray-700 mb-2 flex items-center gap-1.5">
+            <i className="ti ti-file-text text-sm" />Peraturan Sesi Privat
+          </div>
+          <ol className="text-[11px] text-gray-500 leading-relaxed list-decimal list-inside space-y-1">
+            {PERATURAN_SESI.map((p, i) => <li key={i}>{p}</li>)}
+          </ol>
+        </div>
 
         <div className="text-center text-[11px] text-gray-400 pb-4">
           Privat Renang Ilham · {new Date().getFullYear()}

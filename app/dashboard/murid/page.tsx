@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, getMuridJadwalByMurid, replaceMuridJadwal, getJadwalPenggantiByMurid, addJadwalPengganti, deleteJadwalPengganti, Murid, JadwalSlot, MuridJadwal, JadwalPengganti } from '@/lib/supabase'
-import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, HARGA_BASE, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP, fmtShort } from '@/lib/utils'
+import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, getMuridJadwalByMurid, replaceMuridJadwal, getJadwalPenggantiByMurid, addJadwalPengganti, deleteJadwalPengganti, getHargaSetting, Murid, JadwalSlot, MuridJadwal, JadwalPengganti } from '@/lib/supabase'
+import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP, fmtShort } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
 import Avatar from '@/components/ui/Avatar'
@@ -19,13 +19,14 @@ export default function MuridPage() {
   const [jadwalSlots, setJadwalSlots] = useState<JadwalSlot[]>([])
   const [pemilikSuggestions, setPemilikSuggestions] = useState<string[]>([])
   const [pakaiCustomPemilik, setPakaiCustomPemilik] = useState(false)
+  const [hargaSetting, setHargaSetting] = useState<HargaSetting>(DEFAULT_HARGA_SETTING)
 
   const [form, setForm] = useState({
     nama: '', paket: PAKET_LIST[0], wa_ortu: '',
     kategori: 'normal' as 'normal' | 'abk',
     jumlah_sesi: 4 as 4 | 8,
     jadwal_hari: '', jadwal_jam: '', jadwal_kolam: KOLAM_PRESETS[0],
-    harga: HARGA_BASE[PAKET_LIST[0]].normal,
+    harga: DEFAULT_HARGA_SETTING.semi_privat_normal,
     pemilik: 'Ilham',
   })
 
@@ -121,7 +122,7 @@ export default function MuridPage() {
   const updateForm = (updates: Partial<typeof form>) => {
     setForm(prev => {
       const next = { ...prev, ...updates }
-      next.harga = hitungHarga(next.paket, next.kategori, next.jumlah_sesi)
+      next.harga = hitungHarga(hargaSetting, next.paket, next.kategori, next.jumlah_sesi)
       return next
     })
     if (updates.jumlah_sesi) {
@@ -141,6 +142,7 @@ export default function MuridPage() {
     load()
     getJadwalSlot().then(setJadwalSlots).catch(() => {})
     getPemilikSuggestions().then(setPemilikSuggestions).catch(() => {})
+    getHargaSetting().then(setHargaSetting).catch(() => {})
   }, [])
 
   const hariMurid = (m: Murid) => (m.jadwal_hari ?? '').split(',').map((s) => s.trim()).filter(Boolean)
@@ -158,7 +160,7 @@ export default function MuridPage() {
   const resetForm = () => {
     setForm({ nama: '', paket: PAKET_LIST[0], wa_ortu: '', kategori: 'normal',
       jumlah_sesi: 4, jadwal_hari: '', jadwal_jam: '', jadwal_kolam: KOLAM_PRESETS[0],
-      harga: HARGA_BASE[PAKET_LIST[0]].normal, pemilik: 'Ilham' })
+      harga: hitungHarga(hargaSetting, PAKET_LIST[0], 'normal', 4), pemilik: 'Ilham' })
     setJadwalPilihan([])
     setPakaiCustomPemilik(false)
     setEditingId(null)
@@ -173,7 +175,7 @@ export default function MuridPage() {
       kategori: m.kategori, jumlah_sesi: (m.jumlah_sesi as 4|8) ?? 4,
       jadwal_hari: m.jadwal_hari ?? '', jadwal_jam: m.jadwal_jam ?? '',
       jadwal_kolam: m.jadwal_kolam ?? KOLAM_PRESETS[0],
-      harga: m.harga ?? hitungHarga(m.paket, m.kategori, m.jumlah_sesi ?? 4),
+      harga: m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4),
       pemilik: pemilikMurid,
     })
     setShowAdd(true)
@@ -280,7 +282,7 @@ export default function MuridPage() {
               </div>
               <div className="text-[12px] text-text-muted">{m.paket} · {m.jumlah_sesi ?? 4}x/bulan</div>
               <div className="text-[12px] font-semibold text-blue mt-0.5">
-                {fmtRupiah(m.harga ?? hitungHarga(m.paket, m.kategori, m.jumlah_sesi ?? 4))}/bulan
+                {fmtRupiah(m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4))}/bulan
               </div>
               {m.jadwal_hari && (
                 <div className="text-[11px] text-blue/70 mt-0.5 flex items-center gap-1">
