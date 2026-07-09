@@ -661,13 +661,17 @@ export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
 
   return templates.map((t) => {
     const key = `${t.hari}__${t.jam_mulai}__${t.kolam}`
+    const kuota = kuotaMap[key] ?? null
+    const statusDariDB = statusMap[key] ?? 'tersedia'
+    // Kalau kuota sudah 0, paksa status penuh — override apapun yang ada di DB
+    const status = kuota !== null && kuota <= 0 ? 'penuh' : statusDariDB
     return {
       hari: t.hari,
       jam_mulai: t.jam_mulai,
       jam_selesai: t.jam_selesai,
       kolam: t.kolam,
-      status: statusMap[key] ?? 'tersedia',
-      kuota: kuotaMap[key] ?? null,
+      status,
+      kuota,
     }
   })
 }

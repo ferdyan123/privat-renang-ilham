@@ -186,10 +186,25 @@ function DaftarPublikPageContent() {
       const anakList = isAdikKakak
         ? [{ nama: form.nama_murid, usia: parseInt(form.usia) }, ...anakTambahan.map((a) => ({ nama: a.nama, usia: parseInt(a.usia) }))]
         : null
-      const namaMuridFinal = isAdikKakak ? anakList!.map((a) => a.nama).join(' & ') : form.nama_murid
 
-      const { error } = await supabase.from('pending_members').insert({
-        nama_murid: namaMuridFinal,
+      if (isAdikKakak && anakList) {
+        // Insert satu row per anak — bukan digabung jadi 1
+        const rows = anakList.map((anak) => ({
+          nama_murid: anak.nama,
+          nama_ortu: form.nama_ortu, wa_ortu: form.wa_ortu, pemilik: pemilik || null,
+          harga: Math.round(hargaSekarang / anakList.length), // bagi rata per anak
+          paket: form.paket + (form.kategori === 'abk' ? ' +ABK' : '') + ' ' + form.jumlah_sesi + 'x' + ` (${jumlahAnakAdikKakak} anak)`,
+          kategori: form.kategori, jadwal_hari: form.jadwal_hari, jadwal_jam: form.jadwal_jam,
+          catatan: form.catatan || null,
+          kode_promo: promoValid?.kode || null, diskon: promoValid ? diskonAktif : 0,
+          anak_list: anakList, jumlah_anak: anakList.length,
+          status: 'menunggu',
+        }))
+        const { error } = await supabase.from('pending_members').insert(rows)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('pending_members').insert({
+          nama_murid: form.nama_murid,
         usia: parseInt(form.usia),
         nama_ortu: form.nama_ortu,
         wa_ortu: form.wa_ortu,
@@ -209,6 +224,7 @@ function DaftarPublikPageContent() {
         pemilik,
       })
       if (error) throw error
+      }
 
       // Tandai kode promo sudah kepakai (kuota abis → otomatis nonaktif)
       if (promoValid) {
