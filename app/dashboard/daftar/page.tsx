@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getPendingMembers, updatePendingStatus, addMurid, getTagihanPending, getTagihanHistory, updateTagihanStatus, zipJadwal, PendingMember } from '@/lib/supabase'
+import { getPendingMembers, updatePendingStatus, accPendingMemberOnce, addMurid, getTagihanPending, getTagihanHistory, updateTagihanStatus, zipJadwal, PendingMember } from '@/lib/supabase'
 import { showToast } from '@/components/ui/Toast'
 import Avatar from '@/components/ui/Avatar'
 
@@ -15,6 +15,7 @@ export default function DaftarPage() {
   const [historyFilter, setHistoryFilter] = useState<'semua' | 'lunas' | 'belum_bayar'>('semua')
   const [loading, setLoading] = useState(false)
   const [loadingTagihan, setLoadingTagihan] = useState(false)
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set())
 
   const loadPendaftaran = async () => {
     setLoading(true)
@@ -47,60 +48,87 @@ export default function DaftarPage() {
 
   const handleAcc = async (d: PendingMember) => {
     if (!confirm(`ACC pendaftaran ${d.nama_murid}?`)) return
+    // Guard UI: tombol ACC dari row ini sedang diproses → jangan bisa diklik lagi.
+    if (processingIds.has(d.id)) return
+    setProcessingIds((prev) => new Set(prev).add(d.id))
     try {
-      await updatePendingStatus(d.id, 'diterima')
-      // Kolam disimpan sebagai teks di dalam catatan (format lama), format "Kolam: Kolam A"
-      // — dipakai sebagai fallback kalau pendaftaran ini dari SEBELUM kolom jadwal_kolam ada.
-      const kolamMatch = d.catatan?.match(/Kolam:\s*([^|]+)/)
-      const kolamFallback = kolamMatch ? kolamMatch[1].trim() : null
+      // Idempotent: update status HANYA kalau row masih 'menunggu'. Kalau registration
+      // ini sudah pernah di-ACC sebelumnya (double click, race condition, dua tab admin),
+      // accepted akan null → langsung berhenti, TIDAK insert Student sama sekali.
+      const accepted = await accPendingMemberOnce(d.id)
+      if (!accepted) {
+        showToast('Pendaftaran ini sudah diproses sebelumnya', 'error')
+        loadPendaftaran()
+        return
+      }
 
-      // Pecah jadwal gabungan ("Senin, Rabu" / "16:00, 16:00" / "Kolam A, Kolam A")
-      // jadi beberapa baris slot — 1 murid bisa punya lebih dari 1 jadwal seminggu.
-      const jadwalList = zipJadwal(d.jadwal_hari, d.jadwal_jam, d.jadwal_kolam).map((s) => ({
-        ...s,
-        kolam: s.kolam || kolamFallback,
-      }))
+      try {
+        // Kolam disimpan sebagai teks di dalam catatan (format lama), format "Kolam: Kolam A"
+        // — dipakai sebagai fallback kalau pendaftaran ini dari SEBELUM kolom jadwal_kolam ada.
+        const kolamMatch = d.catatan?.match(/Kolam:\s*([^|]+)/)
+        const kolamFallback = kolamMatch ? kolamMatch[1].trim() : null
 
-      // Kategori (normal/abk) disimpan sebagai teks "+ABK" di dalam string paket, bukan kolom terpisah
-      const kategoriFinal: 'normal' | 'abk' = d.paket.includes('+ABK') ? 'abk' : 'normal'
+        // Pecah jadwal gabungan ("Senin, Rabu" / "16:00, 16:00" / "Kolam A, Kolam A")
+        // jadi beberapa baris slot — 1 murid bisa punya lebih dari 1 jadwal seminggu.
+        const jadwalList = zipJadwal(d.jadwal_hari, d.jadwal_jam, d.jadwal_kolam).map((s) => ({
+          ...s,
+          kolam: s.kolam || kolamFallback,
+        }))
 
-      if (d.anak_list && d.anak_list.length > 1) {
-        // Paket Adik Kakak: buat 1 murid PER ANAK, harga total dibagi rata ke tiap anak
-        // supaya sistem tagihan bulanan (1 tagihan = 1 murid) tetap jalan tanpa perlu diubah.
-        const jumlahAnak = d.anak_list.length
-        const hargaPerAnak = Math.round((d.harga ?? 0) / jumlahAnak)
-        for (const anak of d.anak_list) {
+        // Kategori (normal/abk) disimpan sebagai teks "+ABK" di dalam string paket, bukan kolom terpisah
+        const kategoriFinal: 'normal' | 'abk' = d.paket.includes('+ABK') ? 'abk' : 'normal'
+
+        if (d.anak_list && d.anak_list.length > 1) {
+          // Paket Adik Kakak = SATU registration (row ini), tapi tetap butuh 1 record
+          // Student PER ANAK karena absensi dilakukan per anak. Semua Student dari
+          // group ini ditandai kelompok_adik_kakak = registration_id (d.id) supaya
+          // Halaman Murid bisa gabungin mereka jadi 1 card lagi nanti.
+          // Harga total dibagi rata ke tiap anak supaya sistem tagihan bulanan
+          // (1 tagihan = 1 murid) tetap jalan tanpa perlu diubah.
+          const jumlahAnak = d.anak_list.length
+          const hargaPerAnak = Math.round((d.harga ?? 0) / jumlahAnak)
+          for (const anak of d.anak_list) {
+            await addMurid({
+              nama: anak.nama,
+              paket: d.paket,
+              wa_ortu: d.wa_ortu,
+              kategori: kategoriFinal,
+              jadwal_hari: d.jadwal_hari,
+              jadwal_jam: d.jadwal_jam,
+              jadwal_kolam: jadwalList[0]?.kolam ?? '',
+              harga: hargaPerAnak,
+              jumlah_sesi: d.jumlah_sesi ?? 4,
+              pemilik: d.pemilik || 'Ilham',
+              kelompok_adik_kakak: d.id,
+            }, jadwalList)
+          }
+        } else {
           await addMurid({
-            nama: anak.nama,
+            nama: d.nama_murid,
             paket: d.paket,
             wa_ortu: d.wa_ortu,
             kategori: kategoriFinal,
             jadwal_hari: d.jadwal_hari,
             jadwal_jam: d.jadwal_jam,
             jadwal_kolam: jadwalList[0]?.kolam ?? '',
-            harga: hargaPerAnak,
+            harga: d.harga ?? 0,
             jumlah_sesi: d.jumlah_sesi ?? 4,
             pemilik: d.pemilik || 'Ilham',
-            kelompok_adik_kakak: d.id,
           }, jadwalList)
         }
-      } else {
-        await addMurid({
-          nama: d.nama_murid,
-          paket: d.paket,
-          wa_ortu: d.wa_ortu,
-          kategori: kategoriFinal,
-          jadwal_hari: d.jadwal_hari,
-          jadwal_jam: d.jadwal_jam,
-          jadwal_kolam: jadwalList[0]?.kolam ?? '',
-          harga: d.harga ?? 0,
-          jumlah_sesi: d.jumlah_sesi ?? 4,
-          pemilik: d.pemilik || 'Ilham',
-        }, jadwalList)
+        showToast(`${d.nama_murid} diterima ✓`, 'success')
+      } catch (errInsert) {
+        // Insert Student gagal padahal status registration udah kepencet 'diterima' —
+        // rollback biar admin bisa coba ACC lagi tanpa kejebak status "sudah diproses".
+        await updatePendingStatus(d.id, 'menunggu')
+        throw errInsert
       }
-      showToast(`${d.nama_murid} diterima ✓`, 'success')
       loadPendaftaran()
-    } catch { showToast('Gagal acc', 'error') }
+    } catch {
+      showToast('Gagal acc', 'error')
+    } finally {
+      setProcessingIds((prev) => { const next = new Set(prev); next.delete(d.id); return next })
+    }
   }
 
   const handleTolak = async (d: PendingMember) => {
@@ -302,12 +330,22 @@ export default function DaftarPage() {
       <div className="flex flex-col gap-3">
         {list.map((d) => {
           const tgl = new Date(d.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
+          const isGroup = !!(d.anak_list && d.anak_list.length > 1)
+          const headerNama = isGroup ? d.anak_list!.map((a) => a.nama).join(' & ') : d.nama_murid
+          const isProcessing = processingIds.has(d.id)
           return (
             <div key={d.id} className="bg-bg border border-border rounded-lg p-4 shadow-sm">
               <div className="flex items-center gap-3 mb-3">
-                <Avatar nama={d.nama_murid} />
+                <Avatar nama={headerNama} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-[14px] font-semibold text-text">{d.nama_murid}</div>
+                  <div className="text-[14px] font-semibold text-text flex items-center gap-1.5 flex-wrap">
+                    {headerNama}
+                    {isGroup && (
+                      <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">
+                        {d.anak_list!.length} anak
+                      </span>
+                    )}
+                  </div>
                   <div className="text-[12px] text-text-muted flex items-center gap-2 flex-wrap">
                     {tgl} · {statusBadge(d.status)}
                   </div>
@@ -315,7 +353,9 @@ export default function DaftarPage() {
               </div>
               <div className="grid grid-cols-2 gap-2 mb-3">
                 {[
-                  { label: 'Usia', val: `${d.usia} tahun` },
+                  isGroup
+                    ? { label: 'Anak', val: d.anak_list!.map((a) => `${a.nama} (${a.usia}th)`).join(', ') }
+                    : { label: 'Usia', val: `${d.usia} tahun` },
                   { label: 'Paket', val: d.paket },
                   { label: 'Orang tua', val: d.nama_ortu },
                   { label: 'No. WA', val: d.wa_ortu || '—' },
@@ -338,13 +378,14 @@ export default function DaftarPage() {
               )}
               {d.status === 'menunggu' && (
                 <div className="flex gap-2">
-                  <button onClick={() => handleTolak(d)}
-                    className="flex-1 flex items-center justify-center gap-1.5 border border-red/30 text-red text-[13px] font-medium py-2 rounded-md hover:bg-red/5 transition-all">
+                  <button onClick={() => handleTolak(d)} disabled={isProcessing}
+                    className="flex-1 flex items-center justify-center gap-1.5 border border-red/30 text-red text-[13px] font-medium py-2 rounded-md hover:bg-red/5 disabled:opacity-50 transition-all">
                     <i className="ti ti-x text-sm" />Tolak
                   </button>
-                  <button onClick={() => handleAcc(d)}
-                    className="flex-1 flex items-center justify-center gap-1.5 bg-green text-white text-[13px] font-semibold py-2 rounded-md hover:bg-green/90 transition-all">
-                    <i className="ti ti-check text-sm" />ACC & Tambah Murid
+                  <button onClick={() => handleAcc(d)} disabled={isProcessing}
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-green text-white text-[13px] font-semibold py-2 rounded-md hover:bg-green/90 disabled:opacity-50 transition-all">
+                    <i className={`ti ${isProcessing ? 'ti-loader-2 animate-spin' : 'ti-check'} text-sm`} />
+                    {isProcessing ? 'Memproses...' : 'ACC & Tambah Murid'}
                   </button>
                 </div>
               )}

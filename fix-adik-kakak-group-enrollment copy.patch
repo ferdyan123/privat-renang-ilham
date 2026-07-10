@@ -1,0 +1,1070 @@
+diff --git a/app/daftar/page.tsx b/app/daftar/page.tsx
+index 351e88a..254c1c5 100644
+--- a/app/daftar/page.tsx
++++ b/app/daftar/page.tsx
+@@ -187,24 +187,14 @@ function DaftarPublikPageContent() {
+         ? [{ nama: form.nama_murid, usia: parseInt(form.usia) }, ...anakTambahan.map((a) => ({ nama: a.nama, usia: parseInt(a.usia) }))]
+         : null
+ 
+-      if (isAdikKakak && anakList) {
+-        // Insert satu row per anak — bukan digabung jadi 1
+-        const rows = anakList.map((anak) => ({
+-          nama_murid: anak.nama,
+-          nama_ortu: form.nama_ortu, wa_ortu: form.wa_ortu, pemilik: pemilik || null,
+-          harga: Math.round(hargaSekarang / anakList.length), // bagi rata per anak
+-          paket: form.paket + (form.kategori === 'abk' ? ' +ABK' : '') + ' ' + form.jumlah_sesi + 'x' + ` (${jumlahAnakAdikKakak} anak)`,
+-          kategori: form.kategori, jadwal_hari: form.jadwal_hari, jadwal_jam: form.jadwal_jam,
+-          catatan: form.catatan || null,
+-          kode_promo: promoValid?.kode || null, diskon: promoValid ? diskonAktif : 0,
+-          anak_list: anakList, jumlah_anak: anakList.length,
+-          status: 'menunggu',
+-        }))
+-        const { error } = await supabase.from('pending_members').insert(rows)
+-        if (error) throw error
+-      } else {
+-        const { error } = await supabase.from('pending_members').insert({
+-          nama_murid: form.nama_murid,
++      // PENTING: paket Adik Kakak SELALU 1 row registration (1 group), walaupun isinya
++      // beberapa anak. Jangan insert satu row per anak — itu yang bikin Halaman Daftar
++      // tampil ganda & ACC dua kali jadi murid duplicate. Pemisahan jadi beberapa Student
++      // baru terjadi nanti saat ACC (lihat dashboard/daftar → handleAcc).
++      const namaGabungan = isAdikKakak && anakList ? anakList.map((a) => a.nama).join(' & ') : form.nama_murid
++
++      const { error } = await supabase.from('pending_members').insert({
++        nama_murid: namaGabungan,
+         usia: parseInt(form.usia),
+         nama_ortu: form.nama_ortu,
+         wa_ortu: form.wa_ortu,
+@@ -215,7 +205,7 @@ function DaftarPublikPageContent() {
+         bukti_tf_url,
+         catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Sesi: ${form.jumlah_sesi}x | Jadwal: ${jadwalRingkas} | Harga: ${fmtRupiah(hargaSekarang)}${promoValid ? ` | Promo: ${promoValid.kode} (-${fmtRupiah(diskonAktif)})` : ''}${form.catatan ? ' | ' + form.catatan : ''}`,
+         jumlah_sesi: parseInt(form.jumlah_sesi),
+-        harga: totalSetelahDiskon,
++        harga: totalSetelahDiskon, // total keluarga — pembagian per anak dilakukan saat ACC
+         kode_promo: promoValid?.kode ?? null,
+         diskon: diskonAktif,
+         anak_list: anakList,
+@@ -224,7 +214,6 @@ function DaftarPublikPageContent() {
+         pemilik,
+       })
+       if (error) throw error
+-      }
+ 
+       // Tandai kode promo sudah kepakai (kuota abis → otomatis nonaktif)
+       if (promoValid) {
+diff --git a/app/dashboard/daftar/page.tsx b/app/dashboard/daftar/page.tsx
+index 3e3f1cd..f506265 100644
+--- a/app/dashboard/daftar/page.tsx
++++ b/app/dashboard/daftar/page.tsx
+@@ -1,6 +1,6 @@
+ 'use client'
+ import { useEffect, useState } from 'react'
+-import { getPendingMembers, updatePendingStatus, addMurid, getTagihanPending, getTagihanHistory, updateTagihanStatus, zipJadwal, PendingMember } from '@/lib/supabase'
++import { getPendingMembers, updatePendingStatus, accPendingMemberOnce, addMurid, getTagihanPending, getTagihanHistory, updateTagihanStatus, zipJadwal, PendingMember } from '@/lib/supabase'
+ import { showToast } from '@/components/ui/Toast'
+ import Avatar from '@/components/ui/Avatar'
+ 
+@@ -15,6 +15,7 @@ export default function DaftarPage() {
+   const [historyFilter, setHistoryFilter] = useState<'semua' | 'lunas' | 'belum_bayar'>('semua')
+   const [loading, setLoading] = useState(false)
+   const [loadingTagihan, setLoadingTagihan] = useState(false)
++  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set())
+ 
+   const loadPendaftaran = async () => {
+     setLoading(true)
+@@ -47,60 +48,87 @@ export default function DaftarPage() {
+ 
+   const handleAcc = async (d: PendingMember) => {
+     if (!confirm(`ACC pendaftaran ${d.nama_murid}?`)) return
++    // Guard UI: tombol ACC dari row ini sedang diproses → jangan bisa diklik lagi.
++    if (processingIds.has(d.id)) return
++    setProcessingIds((prev) => new Set(prev).add(d.id))
+     try {
+-      await updatePendingStatus(d.id, 'diterima')
+-      // Kolam disimpan sebagai teks di dalam catatan (format lama), format "Kolam: Kolam A"
+-      // — dipakai sebagai fallback kalau pendaftaran ini dari SEBELUM kolom jadwal_kolam ada.
+-      const kolamMatch = d.catatan?.match(/Kolam:\s*([^|]+)/)
+-      const kolamFallback = kolamMatch ? kolamMatch[1].trim() : null
+-
+-      // Pecah jadwal gabungan ("Senin, Rabu" / "16:00, 16:00" / "Kolam A, Kolam A")
+-      // jadi beberapa baris slot — 1 murid bisa punya lebih dari 1 jadwal seminggu.
+-      const jadwalList = zipJadwal(d.jadwal_hari, d.jadwal_jam, d.jadwal_kolam).map((s) => ({
+-        ...s,
+-        kolam: s.kolam || kolamFallback,
+-      }))
+-
+-      // Kategori (normal/abk) disimpan sebagai teks "+ABK" di dalam string paket, bukan kolom terpisah
+-      const kategoriFinal: 'normal' | 'abk' = d.paket.includes('+ABK') ? 'abk' : 'normal'
+-
+-      if (d.anak_list && d.anak_list.length > 1) {
+-        // Paket Adik Kakak: buat 1 murid PER ANAK, harga total dibagi rata ke tiap anak
+-        // supaya sistem tagihan bulanan (1 tagihan = 1 murid) tetap jalan tanpa perlu diubah.
+-        const jumlahAnak = d.anak_list.length
+-        const hargaPerAnak = Math.round((d.harga ?? 0) / jumlahAnak)
+-        for (const anak of d.anak_list) {
++      // Idempotent: update status HANYA kalau row masih 'menunggu'. Kalau registration
++      // ini sudah pernah di-ACC sebelumnya (double click, race condition, dua tab admin),
++      // accepted akan null → langsung berhenti, TIDAK insert Student sama sekali.
++      const accepted = await accPendingMemberOnce(d.id)
++      if (!accepted) {
++        showToast('Pendaftaran ini sudah diproses sebelumnya', 'error')
++        loadPendaftaran()
++        return
++      }
++
++      try {
++        // Kolam disimpan sebagai teks di dalam catatan (format lama), format "Kolam: Kolam A"
++        // — dipakai sebagai fallback kalau pendaftaran ini dari SEBELUM kolom jadwal_kolam ada.
++        const kolamMatch = d.catatan?.match(/Kolam:\s*([^|]+)/)
++        const kolamFallback = kolamMatch ? kolamMatch[1].trim() : null
++
++        // Pecah jadwal gabungan ("Senin, Rabu" / "16:00, 16:00" / "Kolam A, Kolam A")
++        // jadi beberapa baris slot — 1 murid bisa punya lebih dari 1 jadwal seminggu.
++        const jadwalList = zipJadwal(d.jadwal_hari, d.jadwal_jam, d.jadwal_kolam).map((s) => ({
++          ...s,
++          kolam: s.kolam || kolamFallback,
++        }))
++
++        // Kategori (normal/abk) disimpan sebagai teks "+ABK" di dalam string paket, bukan kolom terpisah
++        const kategoriFinal: 'normal' | 'abk' = d.paket.includes('+ABK') ? 'abk' : 'normal'
++
++        if (d.anak_list && d.anak_list.length > 1) {
++          // Paket Adik Kakak = SATU registration (row ini), tapi tetap butuh 1 record
++          // Student PER ANAK karena absensi dilakukan per anak. Semua Student dari
++          // group ini ditandai kelompok_adik_kakak = registration_id (d.id) supaya
++          // Halaman Murid bisa gabungin mereka jadi 1 card lagi nanti.
++          // Harga total dibagi rata ke tiap anak supaya sistem tagihan bulanan
++          // (1 tagihan = 1 murid) tetap jalan tanpa perlu diubah.
++          const jumlahAnak = d.anak_list.length
++          const hargaPerAnak = Math.round((d.harga ?? 0) / jumlahAnak)
++          for (const anak of d.anak_list) {
++            await addMurid({
++              nama: anak.nama,
++              paket: d.paket,
++              wa_ortu: d.wa_ortu,
++              kategori: kategoriFinal,
++              jadwal_hari: d.jadwal_hari,
++              jadwal_jam: d.jadwal_jam,
++              jadwal_kolam: jadwalList[0]?.kolam ?? '',
++              harga: hargaPerAnak,
++              jumlah_sesi: d.jumlah_sesi ?? 4,
++              pemilik: d.pemilik || 'Ilham',
++              kelompok_adik_kakak: d.id,
++            }, jadwalList)
++          }
++        } else {
+           await addMurid({
+-            nama: anak.nama,
++            nama: d.nama_murid,
+             paket: d.paket,
+             wa_ortu: d.wa_ortu,
+             kategori: kategoriFinal,
+             jadwal_hari: d.jadwal_hari,
+             jadwal_jam: d.jadwal_jam,
+             jadwal_kolam: jadwalList[0]?.kolam ?? '',
+-            harga: hargaPerAnak,
++            harga: d.harga ?? 0,
+             jumlah_sesi: d.jumlah_sesi ?? 4,
+             pemilik: d.pemilik || 'Ilham',
+-            kelompok_adik_kakak: d.id,
+           }, jadwalList)
+         }
+-      } else {
+-        await addMurid({
+-          nama: d.nama_murid,
+-          paket: d.paket,
+-          wa_ortu: d.wa_ortu,
+-          kategori: kategoriFinal,
+-          jadwal_hari: d.jadwal_hari,
+-          jadwal_jam: d.jadwal_jam,
+-          jadwal_kolam: jadwalList[0]?.kolam ?? '',
+-          harga: d.harga ?? 0,
+-          jumlah_sesi: d.jumlah_sesi ?? 4,
+-          pemilik: d.pemilik || 'Ilham',
+-        }, jadwalList)
++        showToast(`${d.nama_murid} diterima ✓`, 'success')
++      } catch (errInsert) {
++        // Insert Student gagal padahal status registration udah kepencet 'diterima' —
++        // rollback biar admin bisa coba ACC lagi tanpa kejebak status "sudah diproses".
++        await updatePendingStatus(d.id, 'menunggu')
++        throw errInsert
+       }
+-      showToast(`${d.nama_murid} diterima ✓`, 'success')
+       loadPendaftaran()
+-    } catch { showToast('Gagal acc', 'error') }
++    } catch {
++      showToast('Gagal acc', 'error')
++    } finally {
++      setProcessingIds((prev) => { const next = new Set(prev); next.delete(d.id); return next })
++    }
+   }
+ 
+   const handleTolak = async (d: PendingMember) => {
+@@ -302,12 +330,22 @@ export default function DaftarPage() {
+       <div className="flex flex-col gap-3">
+         {list.map((d) => {
+           const tgl = new Date(d.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
++          const isGroup = !!(d.anak_list && d.anak_list.length > 1)
++          const headerNama = isGroup ? d.anak_list!.map((a) => a.nama).join(' & ') : d.nama_murid
++          const isProcessing = processingIds.has(d.id)
+           return (
+             <div key={d.id} className="bg-bg border border-border rounded-lg p-4 shadow-sm">
+               <div className="flex items-center gap-3 mb-3">
+-                <Avatar nama={d.nama_murid} />
++                <Avatar nama={headerNama} />
+                 <div className="flex-1 min-w-0">
+-                  <div className="text-[14px] font-semibold text-text">{d.nama_murid}</div>
++                  <div className="text-[14px] font-semibold text-text flex items-center gap-1.5 flex-wrap">
++                    {headerNama}
++                    {isGroup && (
++                      <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">
++                        {d.anak_list!.length} anak
++                      </span>
++                    )}
++                  </div>
+                   <div className="text-[12px] text-text-muted flex items-center gap-2 flex-wrap">
+                     {tgl} · {statusBadge(d.status)}
+                   </div>
+@@ -315,7 +353,9 @@ export default function DaftarPage() {
+               </div>
+               <div className="grid grid-cols-2 gap-2 mb-3">
+                 {[
+-                  { label: 'Usia', val: `${d.usia} tahun` },
++                  isGroup
++                    ? { label: 'Anak', val: d.anak_list!.map((a) => `${a.nama} (${a.usia}th)`).join(', ') }
++                    : { label: 'Usia', val: `${d.usia} tahun` },
+                   { label: 'Paket', val: d.paket },
+                   { label: 'Orang tua', val: d.nama_ortu },
+                   { label: 'No. WA', val: d.wa_ortu || '—' },
+@@ -338,13 +378,14 @@ export default function DaftarPage() {
+               )}
+               {d.status === 'menunggu' && (
+                 <div className="flex gap-2">
+-                  <button onClick={() => handleTolak(d)}
+-                    className="flex-1 flex items-center justify-center gap-1.5 border border-red/30 text-red text-[13px] font-medium py-2 rounded-md hover:bg-red/5 transition-all">
++                  <button onClick={() => handleTolak(d)} disabled={isProcessing}
++                    className="flex-1 flex items-center justify-center gap-1.5 border border-red/30 text-red text-[13px] font-medium py-2 rounded-md hover:bg-red/5 disabled:opacity-50 transition-all">
+                     <i className="ti ti-x text-sm" />Tolak
+                   </button>
+-                  <button onClick={() => handleAcc(d)}
+-                    className="flex-1 flex items-center justify-center gap-1.5 bg-green text-white text-[13px] font-semibold py-2 rounded-md hover:bg-green/90 transition-all">
+-                    <i className="ti ti-check text-sm" />ACC & Tambah Murid
++                  <button onClick={() => handleAcc(d)} disabled={isProcessing}
++                    className="flex-1 flex items-center justify-center gap-1.5 bg-green text-white text-[13px] font-semibold py-2 rounded-md hover:bg-green/90 disabled:opacity-50 transition-all">
++                    <i className={`ti ${isProcessing ? 'ti-loader-2 animate-spin' : 'ti-check'} text-sm`} />
++                    {isProcessing ? 'Memproses...' : 'ACC & Tambah Murid'}
+                   </button>
+                 </div>
+               )}
+diff --git a/app/dashboard/murid/page.tsx b/app/dashboard/murid/page.tsx
+index ffe1da1..f9aaf6e 100644
+--- a/app/dashboard/murid/page.tsx
++++ b/app/dashboard/murid/page.tsx
+@@ -1,5 +1,5 @@
+ 'use client'
+-import { useEffect, useState } from 'react'
++import { useEffect, useMemo, useState } from 'react'
+ import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, getMuridJadwalByMurid, replaceMuridJadwal, getJadwalPenggantiByMurid, addJadwalPengganti, deleteJadwalPengganti, getHargaSetting, Murid, JadwalSlot, MuridJadwal, JadwalPengganti } from '@/lib/supabase'
+ import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP, fmtShort } from '@/lib/utils'
+ import { showToast } from '@/components/ui/Toast'
+@@ -30,6 +30,12 @@ export default function MuridPage() {
+     pemilik: 'Ilham',
+   })
+ 
++  // Edit paket Adik Kakak = edit GROUP, bukan 1 murid. editingGroupIds terisi
++  // kalau modal lagi dalam mode "edit group" — field nama & kategori per anak
++  // dikelola terpisah lewat groupChildren (form.nama cuma dipakai buat header display).
++  const [editingGroupIds, setEditingGroupIds] = useState<string[] | null>(null)
++  const [groupChildren, setGroupChildren] = useState<{ id: string; nama: string; kategori: 'normal' | 'abk' }[]>([])
++
+   // Bisa pilih lebih dari 1 jadwal (misal paket 8x/bulan = 2x seminggu)
+   const [jadwalPilihan, setJadwalPilihan] = useState<{ hari: string; jam_mulai: string; kolam: string }[]>([])
+   const maxJadwal = form.jumlah_sesi === 8 ? 2 : 1
+@@ -47,8 +53,10 @@ export default function MuridPage() {
+   }
+ 
+   // ── Ganti Jadwal Minggu Ini (kelas pengganti/makeup 1x) ───────────────────
++  // penggantiMurids array (bukan 1 murid) — buat paket Adik Kakak, perubahan
++  // jadwal berlaku sekaligus ke SEMUA anak dalam grup itu.
+   const [showPengganti, setShowPengganti] = useState(false)
+-  const [penggantiMurid, setPenggantiMurid] = useState<Murid | null>(null)
++  const [penggantiMurids, setPenggantiMurids] = useState<Murid[]>([])
+   const [penggantiSlotsMurid, setPenggantiSlotsMurid] = useState<MuridJadwal[]>([])
+   const [penggantiHistory, setPenggantiHistory] = useState<JadwalPengganti[]>([])
+   const [pgSlotAsalKey, setPgSlotAsalKey] = useState('')
+@@ -60,14 +68,40 @@ export default function MuridPage() {
+ 
+   const slotKey = (hari: string, jam_mulai: string, kolam: string | null) => `${hari}|${jam_mulai}|${kolam ?? ''}`
+ 
+-  const openPengganti = async (m: Murid) => {
+-    setPenggantiMurid(m)
++  // Kunci unik 1 entri pengganti berdasarkan kombinasi tanggal+jam+kolam — dipakai
++  // buat dedupe riwayat gabungan & buat nemuin pasangan record pas mau dihapus.
++  const penggantiKey = (p: Pick<JadwalPengganti, 'tanggal_asal' | 'tanggal_baru' | 'jam' | 'kolam'>) =>
++    `${p.tanggal_asal}|${p.tanggal_baru}|${p.jam}|${p.kolam ?? ''}`
++
++  // Ambil ulang slot jadwal + riwayat pengganti gabungan buat sekumpulan murid
++  // (1 anak kalau solo, 2 anak kalau paket Adik Kakak). Riwayat dari semua anak
++  // digabung & di-dedupe — karena entri pengganti selalu ditambahkan bareng ke
++  // semua anak sekaligus, jadi cukup ditampilkan 1x per kombinasi tanggal/jam.
++  const loadPenggantiData = async (members: Murid[]) => {
++    const first = members[0]
++    const [slots, historiesPerMember] = await Promise.all([
++      getMuridJadwalByMurid(first.id),
++      Promise.all(members.map((m) => getJadwalPenggantiByMurid(m.id))),
++    ])
++    setPenggantiSlotsMurid(slots)
++    const seen = new Set<string>()
++    const merged: JadwalPengganti[] = []
++    historiesPerMember.flat().forEach((p) => {
++      const key = penggantiKey(p)
++      if (seen.has(key)) return
++      seen.add(key)
++      merged.push(p)
++    })
++    merged.sort((a, b) => b.tanggal_baru.localeCompare(a.tanggal_baru))
++    setPenggantiHistory(merged)
++  }
++
++  const openPengganti = async (members: Murid[]) => {
++    setPenggantiMurids(members)
+     setShowPengganti(true)
+     setPgSlotAsalKey(''); setPgTanggalAsal(''); setPgTanggalBaru(''); setPgSlotBaruKey(''); setPgKeterangan('')
+     try {
+-      const [slots, history] = await Promise.all([getMuridJadwalByMurid(m.id), getJadwalPenggantiByMurid(m.id)])
+-      setPenggantiSlotsMurid(slots)
+-      setPenggantiHistory(history)
++      await loadPenggantiData(members)
+     } catch {
+       setPenggantiSlotsMurid([]); setPenggantiHistory([])
+     }
+@@ -80,7 +114,7 @@ export default function MuridPage() {
+   const slotBaruOptions = jadwalSlots.filter((s) => s.hari === hariDariTanggalBaru)
+ 
+   const handleSavePengganti = async () => {
+-    if (!penggantiMurid) return
++    if (penggantiMurids.length === 0) return
+     const slotAsal = penggantiSlotsMurid.find((s) => slotKey(s.hari, s.jam_mulai, s.kolam) === pgSlotAsalKey)
+     if (!slotAsal) { showToast('Pilih jadwal asal yang mau diganti'); return }
+     if (!pgTanggalAsal) { showToast('Isi tanggal yang mau di-skip'); return }
+@@ -89,17 +123,19 @@ export default function MuridPage() {
+     if (!slotBaru) { showToast('Pilih jam pengganti dulu'); return }
+     setPgSaving(true)
+     try {
+-      await addJadwalPengganti({
+-        murid_id: penggantiMurid.id,
+-        tanggal_asal: pgTanggalAsal,
+-        tanggal_baru: pgTanggalBaru,
+-        jam: slotBaru.jam_mulai,
+-        kolam: slotBaru.kolam,
+-        keterangan: pgKeterangan.trim() || null,
+-      })
++      // Berlaku buat SEMUA anak di grup ini sekaligus (paket Adik Kakak = 1 aksi utk 2 anak)
++      for (const m of penggantiMurids) {
++        await addJadwalPengganti({
++          murid_id: m.id,
++          tanggal_asal: pgTanggalAsal,
++          tanggal_baru: pgTanggalBaru,
++          jam: slotBaru.jam_mulai,
++          kolam: slotBaru.kolam,
++          keterangan: pgKeterangan.trim() || null,
++        })
++      }
+       showToast('Jadwal pengganti disimpan ✓', 'success')
+-      const history = await getJadwalPenggantiByMurid(penggantiMurid.id)
+-      setPenggantiHistory(history)
++      await loadPenggantiData(penggantiMurids)
+       setPgTanggalAsal(''); setPgTanggalBaru(''); setPgSlotBaruKey(''); setPgKeterangan('')
+     } catch (e: any) {
+       showToast('Gagal simpan: ' + e?.message, 'error')
+@@ -109,10 +145,18 @@ export default function MuridPage() {
+   }
+ 
+   const handleDeletePengganti = async (p: JadwalPengganti) => {
+-    if (!confirm('Batalkan jadwal pengganti ini? Murid balik ke jadwal asalnya di tanggal itu.')) return
++    const confirmMsg = penggantiMurids.length > 1
++      ? 'Batalkan jadwal pengganti ini untuk KEDUA anak? Mereka balik ke jadwal asalnya di tanggal itu.'
++      : 'Batalkan jadwal pengganti ini? Murid balik ke jadwal asalnya di tanggal itu.'
++    if (!confirm(confirmMsg)) return
+     try {
+-      await deleteJadwalPengganti(p.id)
+-      setPenggantiHistory((prev) => prev.filter((x) => x.id !== p.id))
++      const targetKey = penggantiKey(p)
++      // Cari & hapus entri yang match di SEMUA anak grup ini (bukan cuma 1 record) —
++      // karena setiap anak punya row jadwal_pengganti sendiri-sendiri di database.
++      const historiesPerMember = await Promise.all(penggantiMurids.map((m) => getJadwalPenggantiByMurid(m.id)))
++      const idsToDelete = historiesPerMember.flat().filter((x) => penggantiKey(x) === targetKey).map((x) => x.id)
++      await Promise.all(idsToDelete.map((id) => deleteJadwalPengganti(id)))
++      setPenggantiHistory((prev) => prev.filter((x) => penggantiKey(x) !== targetKey))
+       showToast('Jadwal pengganti dibatalkan', 'success')
+     } catch (e: any) {
+       showToast('Gagal batalkan: ' + e?.message, 'error')
+@@ -122,7 +166,11 @@ export default function MuridPage() {
+   const updateForm = (updates: Partial<typeof form>) => {
+     setForm(prev => {
+       const next = { ...prev, ...updates }
+-      next.harga = hitungHarga(hargaSetting, next.paket, next.kategori, next.jumlah_sesi)
++      // Mode edit group: harga = total keluarga yang dikelola manual, jangan ditimpa
++      // otomatis pakai rumus harga 1 anak.
++      if (!editingGroupIds) {
++        next.harga = hitungHarga(hargaSetting, next.paket, next.kategori, next.jumlah_sesi)
++      }
+       return next
+     })
+     if (updates.jumlah_sesi) {
+@@ -152,6 +200,24 @@ export default function MuridPage() {
+     (!filterHari || hariMurid(m).includes(filterHari))
+   )
+ 
++  // Gabungkan murid Adik Kakak jadi 1 "kartu keluarga" berdasarkan kelompok_adik_kakak
++  // (= id registration asalnya). Ini murni tampilan — data Student di database TETAP
++  // terpisah per anak (absensi, edit, hapus, semua tetap per anak seperti biasa).
++  type MuridGroup = { key: string; members: Murid[] }
++  const groupedFiltered = useMemo<MuridGroup[]>(() => {
++    const byGroup: Record<string, Murid[]> = {}
++    const solo: MuridGroup[] = []
++    for (const m of filtered) {
++      if (m.kelompok_adik_kakak) {
++        (byGroup[m.kelompok_adik_kakak] ??= []).push(m)
++      } else {
++        solo.push({ key: m.id, members: [m] })
++      }
++    }
++    const groups: MuridGroup[] = Object.entries(byGroup).map(([key, members]) => ({ key, members }))
++    return [...groups, ...solo]
++  }, [filtered])
++
+   const hariCount = HARI_LIST.reduce<Record<string, number>>((acc, h) => {
+     acc[h] = list.filter((m) => hariMurid(m).includes(h)).length
+     return acc
+@@ -164,10 +230,13 @@ export default function MuridPage() {
+     setJadwalPilihan([])
+     setPakaiCustomPemilik(false)
+     setEditingId(null)
++    setEditingGroupIds(null)
++    setGroupChildren([])
+   }
+ 
+   const openEdit = async (m: Murid) => {
+     setEditingId(m.id)
++    setEditingGroupIds(null)
+     const pemilikMurid = m.pemilik || 'Ilham'
+     setPakaiCustomPemilik(!PEMILIK_TETAP.includes(pemilikMurid))
+     setForm({
+@@ -188,16 +257,80 @@ export default function MuridPage() {
+     }
+   }
+ 
++  // Edit paket Adik Kakak sebagai 1 GROUP — 1 form buat jadwal/harga/WA/pemilik
++  // yang dibagikan bersama, plus daftar nama+kategori per anak di dalamnya.
++  const openEditGroup = async (members: Murid[]) => {
++    setEditingId(null)
++    setEditingGroupIds(members.map((m) => m.id))
++    setGroupChildren(members.map((m) => ({ id: m.id, nama: m.nama, kategori: m.kategori })))
++    const first = members[0]
++    const pemilikMurid = first.pemilik || 'Ilham'
++    setPakaiCustomPemilik(!PEMILIK_TETAP.includes(pemilikMurid))
++    const totalHarga = members.reduce(
++      (sum, m) => sum + (m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4)), 0
++    )
++    setForm({
++      nama: members.map((m) => m.nama).join(' & '),
++      paket: first.paket, wa_ortu: first.wa_ortu ?? '',
++      kategori: first.kategori, jumlah_sesi: (first.jumlah_sesi as 4|8) ?? 4,
++      jadwal_hari: first.jadwal_hari ?? '', jadwal_jam: first.jadwal_jam ?? '',
++      jadwal_kolam: first.jadwal_kolam ?? KOLAM_PRESETS[0],
++      harga: totalHarga,
++      pemilik: pemilikMurid,
++    })
++    setShowAdd(true)
++    try {
++      const slots = await getMuridJadwalByMurid(first.id)
++      setJadwalPilihan(slots.map((s) => ({ hari: s.hari, jam_mulai: s.jam_mulai, kolam: s.kolam ?? '' })))
++    } catch {
++      setJadwalPilihan([])
++    }
++  }
++
++  const updateGroupChild = (id: string, updates: Partial<{ nama: string; kategori: 'normal' | 'abk' }>) => {
++    setGroupChildren((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)))
++  }
++
+   const handleSave = async () => {
+-    if (!form.nama.trim()) { showToast('Nama harus diisi'); return }
+     if (jadwalPilihan.length === 0) { showToast('Pilih minimal 1 jadwal'); return }
+     if (jadwalPilihan.length !== maxJadwal) { showToast(`Paket ${form.jumlah_sesi}x/bulan wajib pilih ${maxJadwal} jadwal`); return }
+     if (pakaiCustomPemilik && !form.pemilik.trim()) { showToast('Isi dulu nama pemiliknya'); return }
++
++    const jadwalHari = jadwalPilihan.map((s) => s.hari).join(', ')
++    const jadwalJam = jadwalPilihan.map((s) => s.jam_mulai).join(', ')
++    const jadwalKolam = jadwalPilihan.map((s) => s.kolam).join(', ')
++
++    // ── Mode edit GROUP (paket Adik Kakak) — 1 form, update semua anak sekaligus ──
++    if (editingGroupIds) {
++      if (groupChildren.some((c) => !c.nama.trim())) { showToast('Nama semua anak harus diisi'); return }
++      setSaving(true)
++      try {
++        const hargaPerAnak = Math.round(form.harga / groupChildren.length)
++        for (const child of groupChildren) {
++          await updateMurid(child.id, {
++            nama: child.nama.trim(),
++            paket: form.paket,
++            wa_ortu: form.wa_ortu,
++            kategori: child.kategori,
++            jadwal_hari: jadwalHari, jadwal_jam: jadwalJam, jadwal_kolam: jadwalKolam,
++            harga: hargaPerAnak,
++            jumlah_sesi: form.jumlah_sesi,
++            pemilik: form.pemilik,
++          })
++          await replaceMuridJadwal(child.id, jadwalPilihan)
++        }
++        showToast('Paket Adik Kakak diperbarui ✓', 'success')
++        setShowAdd(false); resetForm(); load()
++      } catch (e: any) {
++        showToast('Gagal: ' + e?.message, 'error'); console.error(e)
++      } finally { setSaving(false) }
++      return
++    }
++
++    // ── Mode solo (murid biasa / tambah baru) ──
++    if (!form.nama.trim()) { showToast('Nama harus diisi'); return }
+     setSaving(true)
+     try {
+-      const jadwalHari = jadwalPilihan.map((s) => s.hari).join(', ')
+-      const jadwalJam = jadwalPilihan.map((s) => s.jam_mulai).join(', ')
+-      const jadwalKolam = jadwalPilihan.map((s) => s.kolam).join(', ')
+       const payload = { ...form, jadwal_hari: jadwalHari, jadwal_jam: jadwalJam, jadwal_kolam: jadwalKolam }
+       if (editingId) {
+         await updateMurid(editingId, payload)
+@@ -219,6 +352,19 @@ export default function MuridPage() {
+     catch (e: any) { showToast('Gagal hapus: ' + e?.message, 'error') }
+   }
+ 
++  // Hapus SATU PAKET Adik Kakak sekaligus — kedua anak terhapus bareng, bukan satu-satu.
++  const handleDeleteGroup = async (members: Murid[]) => {
++    const namaGabungan = members.map((m) => m.nama).join(' & ')
++    if (!confirm(`Hapus paket Adik Kakak "${namaGabungan}"? Kedua anak akan terhapus sekaligus.`)) return
++    try {
++      await Promise.all(members.map((m) => deleteMurid(m.id)))
++      showToast(`${namaGabungan} dihapus`)
++      load()
++    } catch (e: any) {
++      showToast('Gagal hapus: ' + e?.message, 'error')
++    }
++  }
++
+   return (
+     <div className="max-w-[720px] mx-auto">
+       <div className="flex gap-2 mb-4">
+@@ -267,53 +413,124 @@ export default function MuridPage() {
+       {loading && <div className="text-center py-12 text-text-muted text-sm"><i className="ti ti-loader-2 text-3xl block mb-2 animate-spin" />Memuat...</div>}
+ 
+       <div className="flex flex-col gap-2">
+-        {filtered.map((m) => (
+-          <div key={m.id} className="bg-bg border border-border rounded-lg px-4 py-3 flex items-center gap-3 shadow-sm">
+-            <Avatar nama={m.nama} />
+-            <div className="flex-1 min-w-0">
+-              <div className="flex items-center gap-2">
+-                <div className="text-[14px] font-semibold text-text truncate">{m.nama}</div>
+-                {m.kategori === 'abk' && <span className="bg-yellow/10 text-yellow text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">ABK</span>}
+-                {m.pemilik && m.pemilik !== 'Ilham' && (
+-                  <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5">
+-                    <i className="ti ti-building-bank text-[10px]" />{m.pemilik}
+-                  </span>
+-                )}
+-              </div>
+-              <div className="text-[12px] text-text-muted">{m.paket} · {m.jumlah_sesi ?? 4}x/bulan</div>
+-              <div className="text-[12px] font-semibold text-blue mt-0.5">
+-                {fmtRupiah(m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4))}/bulan
++        {groupedFiltered.map((g) => {
++          if (g.members.length === 1) {
++            const m = g.members[0]
++            return (
++              <div key={g.key} className="bg-bg border border-border rounded-lg px-4 py-3 flex items-center gap-3 shadow-sm">
++                <Avatar nama={m.nama} />
++                <div className="flex-1 min-w-0">
++                  <div className="flex items-center gap-2">
++                    <div className="text-[14px] font-semibold text-text truncate">{m.nama}</div>
++                    {m.kategori === 'abk' && <span className="bg-yellow/10 text-yellow text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">ABK</span>}
++                    {m.pemilik && m.pemilik !== 'Ilham' && (
++                      <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5">
++                        <i className="ti ti-building-bank text-[10px]" />{m.pemilik}
++                      </span>
++                    )}
++                  </div>
++                  <div className="text-[12px] text-text-muted">{m.paket} · {m.jumlah_sesi ?? 4}x/bulan</div>
++                  <div className="text-[12px] font-semibold text-blue mt-0.5">
++                    {fmtRupiah(m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4))}/bulan
++                  </div>
++                  {m.jadwal_hari && (
++                    <div className="text-[11px] text-blue/70 mt-0.5 flex items-center gap-1">
++                      <i className="ti ti-calendar-time text-[11px]" />
++                      {m.jadwal_hari} {m.jadwal_jam} · {m.jadwal_kolam}
++                    </div>
++                  )}
++                </div>
++                <div className="flex items-center gap-1.5">
++                  {m.wa_ortu && (
++                    <a href={`https://wa.me/62${m.wa_ortu.replace(/^0/, '')}`} target="_blank"
++                      className="w-8 h-8 flex items-center justify-center rounded-full bg-[#E6F1FB] text-blue hover:bg-blue hover:text-white transition-all">
++                      <i className="ti ti-brand-whatsapp text-base" />
++                    </a>
++                  )}
++                  <button onClick={() => openPengganti([m])}
++                    title="Ganti Jadwal Minggu Ini"
++                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-yellow/10 text-text-muted hover:text-yellow transition-all">
++                    <i className="ti ti-calendar-repeat text-base" />
++                  </button>
++                  <button onClick={() => openEdit(m)}
++                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
++                    <i className="ti ti-edit text-base" />
++                  </button>
++                  <button onClick={() => handleDelete(m)}
++                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
++                    <i className="ti ti-trash text-base" />
++                  </button>
++                </div>
+               </div>
+-              {m.jadwal_hari && (
+-                <div className="text-[11px] text-blue/70 mt-0.5 flex items-center gap-1">
+-                  <i className="ti ti-calendar-time text-[11px]" />
+-                  {m.jadwal_hari} {m.jadwal_jam} · {m.jadwal_kolam}
++            )
++          }
++
++          // ── Kartu Keluarga (Adik Kakak) — 1 ENTITAS: semua aksi (WA, Ganti Jadwal,
++          // Edit, Hapus) berlaku buat seluruh paket sekaligus, bukan per anak. Data
++          // Student tetap 2 record di database (buat absensi & identitas per anak).
++          const namaGabungan = g.members.map((m) => m.nama).join(' & ')
++          const totalHarga = g.members.reduce((sum, m) => sum + (m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4)), 0)
++          const first = g.members[0]
++          return (
++            <div key={g.key} className="bg-bg border border-border rounded-lg px-4 py-3 shadow-sm">
++              <div className="flex items-center gap-3 mb-2.5">
++                <Avatar nama={namaGabungan} />
++                <div className="flex-1 min-w-0">
++                  <div className="flex items-center gap-2 flex-wrap">
++                    <div className="text-[14px] font-semibold text-text truncate">{namaGabungan}</div>
++                    <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">
++                      {g.members.length} anak
++                    </span>
++                  </div>
++                  <div className="text-[12px] text-text-muted">{first.paket} · {first.jumlah_sesi ?? 4}x/bulan</div>
++                  <div className="text-[12px] font-semibold text-blue mt-0.5">{fmtRupiah(totalHarga)}/bulan</div>
++                  {first.jadwal_hari && (
++                    <div className="text-[11px] text-blue/70 mt-0.5 flex items-center gap-1">
++                      <i className="ti ti-calendar-time text-[11px]" />
++                      {first.jadwal_hari} {first.jadwal_jam} · {first.jadwal_kolam}
++                    </div>
++                  )}
+                 </div>
+-              )}
+-            </div>
+-            <div className="flex items-center gap-1.5">
+-              {m.wa_ortu && (
+-                <a href={`https://wa.me/62${m.wa_ortu.replace(/^0/, '')}`} target="_blank"
+-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-[#E6F1FB] text-blue hover:bg-blue hover:text-white transition-all">
+-                  <i className="ti ti-brand-whatsapp text-base" />
+-                </a>
+-              )}
+-              <button onClick={() => openPengganti(m)}
+-                title="Ganti Jadwal Minggu Ini"
+-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-yellow/10 text-text-muted hover:text-yellow transition-all">
+-                <i className="ti ti-calendar-repeat text-base" />
+-              </button>
+-              <button onClick={() => openEdit(m)}
+-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
+-                <i className="ti ti-edit text-base" />
+-              </button>
+-              <button onClick={() => handleDelete(m)}
+-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
+-                <i className="ti ti-trash text-base" />
+-              </button>
++                {/* Aksi GROUP — 1 tombol berlaku buat seluruh paket, bukan per anak */}
++                <div className="flex items-center gap-1.5">
++                  {first.wa_ortu && (
++                    <a href={`https://wa.me/62${first.wa_ortu.replace(/^0/, '')}`} target="_blank"
++                      title="WhatsApp orang tua"
++                      className="w-8 h-8 flex items-center justify-center rounded-full bg-[#E6F1FB] text-blue hover:bg-blue hover:text-white transition-all">
++                      <i className="ti ti-brand-whatsapp text-base" />
++                    </a>
++                  )}
++                  <button onClick={() => openPengganti(g.members)}
++                    title="Ganti Jadwal Minggu Ini — berlaku utk semua anak"
++                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-yellow/10 text-text-muted hover:text-yellow transition-all">
++                    <i className="ti ti-calendar-repeat text-base" />
++                  </button>
++                  <button onClick={() => openEditGroup(g.members)}
++                    title="Edit paket (1 form utk semua anak)"
++                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
++                    <i className="ti ti-edit text-base" />
++                  </button>
++                  <button onClick={() => handleDeleteGroup(g.members)}
++                    title="Hapus paket (kedua anak sekaligus)"
++                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
++                    <i className="ti ti-trash text-base" />
++                  </button>
++                </div>
++              </div>
++
++              {/* Daftar anak — display-only, bukan tempat aksi (aksi ada di atas, level group) */}
++              <div className="border-t border-border pt-2 flex flex-wrap gap-1.5">
++                {g.members.map((m) => (
++                  <span key={m.id} className="inline-flex items-center gap-1 bg-bg-2 text-text text-[11px] font-medium px-2 py-1 rounded-md">
++                    <i className="ti ti-user text-[10px] text-text-muted" />
++                    {m.nama}
++                    {m.kategori === 'abk' && <span className="text-yellow font-semibold">· ABK</span>}
++                  </span>
++                ))}
++              </div>
+             </div>
+-          </div>
+-        ))}
++          )
++        })}
+       </div>
+ 
+       {!loading && filtered.length === 0 && (
+@@ -323,14 +540,43 @@ export default function MuridPage() {
+         </div>
+       )}
+ 
+-      <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title={editingId ? 'Edit Murid' : 'Tambah Murid Baru'}>
++      <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }}
++        title={editingGroupIds ? 'Edit Paket Adik Kakak' : editingId ? 'Edit Murid' : 'Tambah Murid Baru'}>
+         <div className="flex flex-col gap-3">
+-          <div>
+-            <label className="text-[12px] text-text-muted block mb-1">Nama murid</label>
+-            <input type="text" placeholder="Nama lengkap" value={form.nama}
+-              onChange={(e) => updateForm({ nama: e.target.value })}
+-              className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+-          </div>
++          {editingGroupIds ? (
++            <div className="bg-blue-light/40 border border-blue/10 rounded-lg p-3">
++              <div className="text-[12px] font-semibold text-blue mb-2">Nama & kategori tiap anak</div>
++              <div className="flex flex-col gap-2">
++                {groupChildren.map((c, idx) => (
++                  <div key={c.id} className="flex gap-2 items-center">
++                    <input type="text" placeholder={`Nama anak ${idx + 1}`} value={c.nama}
++                      onChange={(e) => updateGroupChild(c.id, { nama: e.target.value })}
++                      className="flex-1 border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
++                    <div className="flex gap-1 flex-shrink-0">
++                      {(['normal', 'abk'] as const).map((k) => (
++                        <button key={k} onClick={() => updateGroupChild(c.id, { kategori: k })}
++                          className={`px-2.5 py-2 rounded-md border text-[11px] font-medium transition-all ${c.kategori === k
++                            ? k === 'abk' ? 'bg-yellow/10 border-yellow text-yellow' : 'bg-blue-light border-blue text-blue'
++                            : 'border-border text-text-muted'}`}>
++                          {k === 'abk' ? 'ABK' : 'Normal'}
++                        </button>
++                      ))}
++                    </div>
++                  </div>
++                ))}
++              </div>
++              <div className="text-[11px] text-blue/70 mt-2">
++                Jadwal, harga, WA, dan pemilik di bawah berlaku sama buat semua anak di paket ini.
++              </div>
++            </div>
++          ) : (
++            <div>
++              <label className="text-[12px] text-text-muted block mb-1">Nama murid</label>
++              <input type="text" placeholder="Nama lengkap" value={form.nama}
++                onChange={(e) => updateForm({ nama: e.target.value })}
++                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
++            </div>
++          )}
+           <div>
+             <label className="text-[12px] text-text-muted block mb-1">No. WA orang tua</label>
+             <input type="tel" placeholder="08xxxxxxxxxx" value={form.wa_ortu}
+@@ -338,6 +584,14 @@ export default function MuridPage() {
+               className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+           </div>
+ 
++          {editingGroupIds ? (
++            <div>
++              <label className="text-[12px] text-text-muted block mb-1">Paket</label>
++              <div className="border border-border rounded-md px-3 py-2 text-[13px] text-text bg-bg-2">
++                {form.paket} <span className="text-text-muted text-[11px]">(tipe paket gak bisa diubah dari sini)</span>
++              </div>
++            </div>
++          ) : (
+           <div>
+             <label className="text-[12px] text-text-muted block mb-1.5">Paket</label>
+             <div className="flex gap-2">
+@@ -349,6 +603,7 @@ export default function MuridPage() {
+               ))}
+             </div>
+           </div>
++          )}
+ 
+           <div>
+             <label className="text-[12px] text-text-muted block mb-1.5">Jumlah sesi per bulan</label>
+@@ -362,6 +617,7 @@ export default function MuridPage() {
+             </div>
+           </div>
+ 
++          {!editingGroupIds && (
+           <div>
+             <label className="text-[12px] text-text-muted block mb-1.5">Kategori murid</label>
+             <div className="grid grid-cols-2 gap-2">
+@@ -376,6 +632,7 @@ export default function MuridPage() {
+               ))}
+             </div>
+           </div>
++          )}
+ 
+           <div>
+             <label className="text-[12px] text-text-muted block mb-1.5">Pemilik (rekening penagihan)</label>
+@@ -412,8 +669,10 @@ export default function MuridPage() {
+ 
+           <div className="bg-blue-light border border-blue/20 rounded-md px-3 py-2.5">
+             <div className="flex items-center justify-between mb-1.5">
+-              <div className="text-[11px] text-text-muted">Harga/bulan</div>
+-              <div className="text-[10px] text-blue/60">{form.paket} · {form.jumlah_sesi}x · {form.kategori === 'abk' ? 'ABK' : 'Normal'}</div>
++              <div className="text-[11px] text-text-muted">{editingGroupIds ? `Harga total/bulan (${groupChildren.length} anak)` : 'Harga/bulan'}</div>
++              <div className="text-[10px] text-blue/60">
++                {editingGroupIds ? `${form.paket} · ${form.jumlah_sesi}x` : `${form.paket} · ${form.jumlah_sesi}x · ${form.kategori === 'abk' ? 'ABK' : 'Normal'}`}
++              </div>
+             </div>
+             <div className="flex items-center gap-2">
+               <span className="text-[14px] font-semibold text-blue flex-shrink-0">Rp</span>
+@@ -426,7 +685,11 @@ export default function MuridPage() {
+                 placeholder="0"
+               />
+             </div>
+-            <div className="text-[10px] text-blue/50 mt-1">Harga otomatis dari paket. Bisa diubah manual jika ada harga khusus.</div>
++            <div className="text-[10px] text-blue/50 mt-1">
++              {editingGroupIds
++                ? `Harga total keluarga — dibagi rata jadi Rp ${Math.round(form.harga / Math.max(1, groupChildren.length)).toLocaleString('id-ID')}/anak saat disimpan.`
++                : 'Harga otomatis dari paket. Bisa diubah manual jika ada harga khusus.'}
++            </div>
+           </div>
+ 
+           <div className="bg-blue-light/40 border border-blue/10 rounded-lg p-3">
+@@ -482,20 +745,23 @@ export default function MuridPage() {
+ 
+           <button onClick={handleSave} disabled={saving}
+             className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-sm font-semibold mt-1 hover:bg-[#0C447C] disabled:opacity-50 transition-all">
+-            {saving ? 'Menyimpan...' : (editingId ? 'Simpan Perubahan' : 'Tambah Murid')}
++            {saving ? 'Menyimpan...' : (editingGroupIds ? 'Simpan Perubahan Paket' : editingId ? 'Simpan Perubahan' : 'Tambah Murid')}
+           </button>
+         </div>
+       </Modal>
+ 
+-      <Modal open={showPengganti} onClose={() => setShowPengganti(false)} title={`Ganti Jadwal Minggu Ini${penggantiMurid ? ` — ${penggantiMurid.nama}` : ''}`}>
++      <Modal open={showPengganti} onClose={() => setShowPengganti(false)}
++        title={`Ganti Jadwal Minggu Ini${penggantiMurids.length ? ` — ${penggantiMurids.map((m) => m.nama).join(' & ')}` : ''}`}>
+         <div className="flex flex-col gap-3">
+           <div className="text-[12px] text-text-muted -mt-1">
+-            Jadwal tetap murid gak berubah. Ini cuma buat 1x pengecualian — minggu depan otomatis balik ke jadwal aslinya.
++            {penggantiMurids.length > 1
++              ? 'Jadwal tetap kedua anak gak berubah. Ini cuma buat 1x pengecualian yang berlaku ke keduanya — minggu depan otomatis balik ke jadwal aslinya.'
++              : 'Jadwal tetap murid gak berubah. Ini cuma buat 1x pengecualian — minggu depan otomatis balik ke jadwal aslinya.'}
+           </div>
+ 
+           {penggantiSlotsMurid.length === 0 ? (
+             <div className="text-center py-4 text-text-muted text-[12px]">
+-              Murid ini belum punya jadwal tetap. Atur dulu jadwalnya lewat tombol Edit.
++              Belum ada jadwal tetap. Atur dulu jadwalnya lewat tombol Edit.
+             </div>
+           ) : (
+             <>
+diff --git a/app/dashboard/page.tsx b/app/dashboard/page.tsx
+index 44ce152..6c7bc26 100644
+--- a/app/dashboard/page.tsx
++++ b/app/dashboard/page.tsx
+@@ -91,13 +91,8 @@ export default function HariIniPage() {
+     getMuridSiapTagih().then(setSiapTagihList).catch(() => {})
+   }, [])
+ 
+-  // Set status langsung dari klik tombol spesifik (bukan toggle berputar)
+-  const setStatus = (sesiId: string, muridId: string, status: Absensi['status']) => {
+-    setAbsenMap((prev) => ({
+-      ...prev,
+-      [sesiId]: { ...prev[sesiId], [muridId]: status }
+-    }))
+-  }
++  // Status per-murid individual digantikan setEntitasStatus (lihat bawah) —
++  // paket Adik Kakak sekarang selalu di-set bareng lewat 1 kontrol UI.
+ 
+   const saveAbsen = async (sesiId: string) => {
+     setSavingSesi(sesiId)
+@@ -161,8 +156,19 @@ export default function HariIniPage() {
+     finally { setSaving(false) }
+   }
+ 
+-  const hadirCount = (sesiId: string, murids: Murid[] = muridList) =>
+-    murids.filter((m) => absenMap[sesiId]?.[m.id] === 'hadir').length
++  // Konfigurasi 3 tombol status
++  const STATUS_BTNS: { key: Absensi['status']; label: string; icon: string }[] = [
++    { key: 'hadir', label: 'Hadir', icon: 'ti-check' },
++    { key: 'izin',  label: 'Izin',  icon: 'ti-clock-pause' },
++    { key: 'alpha', label: 'Alpha', icon: 'ti-x' },
++  ]
++
++  const btnActiveClass = (status: Absensi['status'], current: Absensi['status'] | undefined) => {
++    const isActive = current === status
++    if (status === 'hadir') return isActive ? 'bg-blue text-white border-blue' : 'border-border text-text-muted hover:border-blue/40'
++    if (status === 'izin')  return isActive ? 'bg-yellow text-white border-yellow' : 'border-border text-text-muted hover:border-yellow/40'
++    return isActive ? 'bg-red text-white border-red' : 'border-border text-text-muted hover:border-red/40'
++  }
+ 
+   // Cuma murid yang punya SALAH SATU jadwal (hari+jam+kolam) cocok sama sesi ini.
+   // Murid dengan 2 jadwal (misal paket 8x/bulan) otomatis nongol di 2 sesi berbeda.
+@@ -192,20 +198,52 @@ export default function HariIniPage() {
+     return muridList.filter((m) => muridIds.has(m.id))
+   }
+ 
+-  // Konfigurasi 3 tombol status
+-  const STATUS_BTNS: { key: Absensi['status']; label: string; icon: string }[] = [
+-    { key: 'hadir', label: 'Hadir', icon: 'ti-check' },
+-    { key: 'izin',  label: 'Izin',  icon: 'ti-clock-pause' },
+-    { key: 'alpha', label: 'Alpha', icon: 'ti-x' },
+-  ]
++  // ── Grouping paket Adik Kakak di absensi ──────────────────────────────────
++  // Paket Adik Kakak = 1 ENTITAS absensi, bukan 2 murid terpisah. Semua murid
++  // dengan kelompok_adik_kakak yang sama (dan sama-sama masuk sesi ini)
++  // digabung jadi 1 baris dengan 1 set tombol Hadir/Izin/Alpha.
++  type EntitasAbsensi = { key: string; members: Murid[] }
+ 
+-  const btnActiveClass = (status: Absensi['status'], current: Absensi['status'] | undefined) => {
+-    const isActive = current === status
+-    if (status === 'hadir') return isActive ? 'bg-blue text-white border-blue' : 'border-border text-text-muted hover:border-blue/40'
+-    if (status === 'izin')  return isActive ? 'bg-yellow text-white border-yellow' : 'border-border text-text-muted hover:border-yellow/40'
+-    return isActive ? 'bg-red text-white border-red' : 'border-border text-text-muted hover:border-red/40'
++  const entitasUntukSesi = (s: Sesi): EntitasAbsensi[] => {
++    const murids = muridUntukSesi(s)
++    const seen = new Set<string>()
++    const entitas: EntitasAbsensi[] = []
++    murids.forEach((m) => {
++      const key = m.kelompok_adik_kakak || m.id
++      if (seen.has(key)) return
++      seen.add(key)
++      const members = m.kelompok_adik_kakak
++        ? murids.filter((x) => x.kelompok_adik_kakak === key)
++        : [m]
++      entitas.push({ key, members })
++    })
++    return entitas
++  }
++
++  // Status gabungan 1 entitas: kalau SALAH SATU anak hadir → dianggap Hadir
++  // (prioritas hadir > izin > alpha). Ini juga yang jadi status yang di-set
++  // ke KEDUA anak sekaligus saat admin klik salah satu tombol.
++  const groupStatus = (sesiId: string, members: Murid[]): Absensi['status'] | undefined => {
++    const statuses = members.map((m) => absenMap[sesiId]?.[m.id])
++    if (statuses.some((st) => st === 'hadir')) return 'hadir'
++    if (statuses.some((st) => st === 'izin')) return 'izin'
++    if (statuses.some((st) => st === 'alpha')) return 'alpha'
++    return undefined
+   }
+ 
++  // Set status ke SEMUA anggota entitas sekaligus (1 klik = kedua anak ke-set,
++  // gak mungkin beda status lagi karena cuma ada 1 kontrol di UI)
++  const setEntitasStatus = (sesiId: string, members: Murid[], status: Absensi['status']) => {
++    setAbsenMap((prev) => {
++      const sesiMap = { ...prev[sesiId] }
++      members.forEach((m) => { sesiMap[m.id] = status })
++      return { ...prev, [sesiId]: sesiMap }
++    })
++  }
++
++  const hadirCountEntitas = (entitas: EntitasAbsensi[], sesiId: string) =>
++    entitas.filter((e) => groupStatus(sesiId, e.members) === 'hadir').length
++
+   return (
+     <div className="max-w-[720px] mx-auto">
+       {/* Header tanggal — bisa diklik buat pilih tanggal lain */}
+@@ -293,9 +331,9 @@ export default function HariIniPage() {
+ 
+       {/* Sesi cards */}
+       {sesiList.map((s) => {
+-        const muridSesi = muridUntukSesi(s)
+-        const hadir = hadirCount(s.id, muridSesi)
+-        const pct = muridSesi.length ? Math.round(hadir / muridSesi.length * 100) : 0
++        const entitas = entitasUntukSesi(s)
++        const hadir = hadirCountEntitas(entitas, s.id)
++        const pct = entitas.length ? Math.round(hadir / entitas.length * 100) : 0
+         return (
+           <div key={s.id} className="bg-bg border border-border rounded-lg mb-3 overflow-hidden shadow-sm">
+             <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+@@ -309,7 +347,7 @@ export default function HariIniPage() {
+                 <div className="text-[12px] text-text-muted">{s.kolam} · {s.durasi} menit</div>
+               </div>
+               <div className="ml-auto flex items-center gap-3">
+-                <div className="text-[13px] text-text-muted">{hadir}/{muridSesi.length}</div>
++                <div className="text-[13px] text-text-muted">{hadir}/{entitas.length}</div>
+                 <div className="w-10 h-10 relative">
+                   <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
+                     <circle cx="18" cy="18" r="15.9" fill="none" stroke="#E6F1FB" strokeWidth="3" />
+@@ -321,28 +359,33 @@ export default function HariIniPage() {
+               </div>
+             </div>
+ 
+-            {/* List murid dengan 3 tombol status — cuma murid yang jadwalnya cocok sesi ini */}
++            {/* List entitas (murid solo ATAU paket Adik Kakak digabung) dengan 3 tombol status */}
+             <div className="p-3 flex flex-col gap-2">
+-              {muridSesi.length === 0 && (
++              {entitas.length === 0 && (
+                 <div className="text-center py-3 text-text-muted text-[12px]">Belum ada murid dengan jadwal tetap di sesi ini</div>
+               )}
+-              {muridSesi.map((m) => {
+-                const st = absenMap[s.id]?.[m.id]
++              {entitas.map((e) => {
++                const st = groupStatus(s.id, e.members)
++                const namaGabungan = e.members.map((m) => m.nama).join(' & ')
++                const adaAbk = e.members.some((m) => m.kategori === 'abk')
+                 return (
+-                  <div key={m.id} className="flex items-center gap-2.5 px-2 py-1.5">
+-                    <Avatar nama={m.nama} size="sm" />
++                  <div key={e.key} className="flex items-center gap-2.5 px-2 py-1.5">
++                    <Avatar nama={namaGabungan} size="sm" />
+                     <div className="flex-1 min-w-0">
+                       <div className="text-[13px] font-medium text-text truncate flex items-center gap-1.5">
+-                        {m.nama}
+-                        {m.kategori === 'abk' && <span className="text-[9px] bg-yellow/10 text-yellow px-1 py-0.5 rounded-full flex-shrink-0">ABK</span>}
++                        {namaGabungan}
++                        {adaAbk && <span className="text-[9px] bg-yellow/10 text-yellow px-1 py-0.5 rounded-full flex-shrink-0">ABK</span>}
++                        {e.members.length > 1 && (
++                          <span className="text-[9px] bg-blue-light text-blue px-1 py-0.5 rounded-full flex-shrink-0">Adik Kakak</span>
++                        )}
+                       </div>
+                     </div>
+-                    {/* 3 tombol status — H / I / A */}
++                    {/* 3 tombol status — H / I / A, berlaku buat semua anggota entitas sekaligus */}
+                     <div className="flex gap-1 flex-shrink-0">
+                       {STATUS_BTNS.map((btn) => (
+                         <button
+                           key={btn.key}
+-                          onClick={() => setStatus(s.id, m.id, btn.key)}
++                          onClick={() => setEntitasStatus(s.id, e.members, btn.key)}
+                           title={btn.label}
+                           className={`w-8 h-8 rounded-md border flex items-center justify-center transition-all ${btnActiveClass(btn.key, st)}`}
+                         >
+diff --git a/lib/supabase.ts b/lib/supabase.ts
+index ca13140..7c11efb 100644
+--- a/lib/supabase.ts
++++ b/lib/supabase.ts
+@@ -322,6 +322,22 @@ export const updatePendingStatus = async (id: string, status: string) => {
+   if (error) throw error
+ }
+ 
++// Idempotent ACC — hanya berhasil kalau row masih berstatus 'menunggu'. Kalau row
++// sudah diproses sebelumnya (mis. double click / dua tab admin), .eq('status','menunggu')
++// gak akan match apapun → data null → caller tahu harus BATALIN pembuatan Student,
++// bukan lanjut insert lagi. Ini yang bikin proses ACC transaction-safe & idempotent.
++export const accPendingMemberOnce = async (id: string): Promise<PendingMember | null> => {
++  const { data, error } = await supabase
++    .from('pending_members')
++    .update({ status: 'diterima' })
++    .eq('id', id)
++    .eq('status', 'menunggu')
++    .select()
++    .maybeSingle()
++  if (error) throw error
++  return data
++}
++
+ // ── Tagihan ────────────────────────────────────────────────────────────────
+ 
+ export interface Tagihan {

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, getMuridJadwalByMurid, replaceMuridJadwal, getJadwalPenggantiByMurid, addJadwalPengganti, deleteJadwalPengganti, getHargaSetting, Murid, JadwalSlot, MuridJadwal, JadwalPengganti } from '@/lib/supabase'
 import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP, fmtShort } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
@@ -30,6 +30,12 @@ export default function MuridPage() {
     pemilik: 'Ilham',
   })
 
+  // Edit paket Adik Kakak = edit GROUP, bukan 1 murid. editingGroupIds terisi
+  // kalau modal lagi dalam mode "edit group" — field nama & kategori per anak
+  // dikelola terpisah lewat groupChildren (form.nama cuma dipakai buat header display).
+  const [editingGroupIds, setEditingGroupIds] = useState<string[] | null>(null)
+  const [groupChildren, setGroupChildren] = useState<{ id: string; nama: string; kategori: 'normal' | 'abk' }[]>([])
+
   // Bisa pilih lebih dari 1 jadwal (misal paket 8x/bulan = 2x seminggu)
   const [jadwalPilihan, setJadwalPilihan] = useState<{ hari: string; jam_mulai: string; kolam: string }[]>([])
   const maxJadwal = form.jumlah_sesi === 8 ? 2 : 1
@@ -47,8 +53,10 @@ export default function MuridPage() {
   }
 
   // ── Ganti Jadwal Minggu Ini (kelas pengganti/makeup 1x) ───────────────────
+  // penggantiMurids array (bukan 1 murid) — buat paket Adik Kakak, perubahan
+  // jadwal berlaku sekaligus ke SEMUA anak dalam grup itu.
   const [showPengganti, setShowPengganti] = useState(false)
-  const [penggantiMurid, setPenggantiMurid] = useState<Murid | null>(null)
+  const [penggantiMurids, setPenggantiMurids] = useState<Murid[]>([])
   const [penggantiSlotsMurid, setPenggantiSlotsMurid] = useState<MuridJadwal[]>([])
   const [penggantiHistory, setPenggantiHistory] = useState<JadwalPengganti[]>([])
   const [pgSlotAsalKey, setPgSlotAsalKey] = useState('')
@@ -60,14 +68,40 @@ export default function MuridPage() {
 
   const slotKey = (hari: string, jam_mulai: string, kolam: string | null) => `${hari}|${jam_mulai}|${kolam ?? ''}`
 
-  const openPengganti = async (m: Murid) => {
-    setPenggantiMurid(m)
+  // Kunci unik 1 entri pengganti berdasarkan kombinasi tanggal+jam+kolam — dipakai
+  // buat dedupe riwayat gabungan & buat nemuin pasangan record pas mau dihapus.
+  const penggantiKey = (p: Pick<JadwalPengganti, 'tanggal_asal' | 'tanggal_baru' | 'jam' | 'kolam'>) =>
+    `${p.tanggal_asal}|${p.tanggal_baru}|${p.jam}|${p.kolam ?? ''}`
+
+  // Ambil ulang slot jadwal + riwayat pengganti gabungan buat sekumpulan murid
+  // (1 anak kalau solo, 2 anak kalau paket Adik Kakak). Riwayat dari semua anak
+  // digabung & di-dedupe — karena entri pengganti selalu ditambahkan bareng ke
+  // semua anak sekaligus, jadi cukup ditampilkan 1x per kombinasi tanggal/jam.
+  const loadPenggantiData = async (members: Murid[]) => {
+    const first = members[0]
+    const [slots, historiesPerMember] = await Promise.all([
+      getMuridJadwalByMurid(first.id),
+      Promise.all(members.map((m) => getJadwalPenggantiByMurid(m.id))),
+    ])
+    setPenggantiSlotsMurid(slots)
+    const seen = new Set<string>()
+    const merged: JadwalPengganti[] = []
+    historiesPerMember.flat().forEach((p) => {
+      const key = penggantiKey(p)
+      if (seen.has(key)) return
+      seen.add(key)
+      merged.push(p)
+    })
+    merged.sort((a, b) => b.tanggal_baru.localeCompare(a.tanggal_baru))
+    setPenggantiHistory(merged)
+  }
+
+  const openPengganti = async (members: Murid[]) => {
+    setPenggantiMurids(members)
     setShowPengganti(true)
     setPgSlotAsalKey(''); setPgTanggalAsal(''); setPgTanggalBaru(''); setPgSlotBaruKey(''); setPgKeterangan('')
     try {
-      const [slots, history] = await Promise.all([getMuridJadwalByMurid(m.id), getJadwalPenggantiByMurid(m.id)])
-      setPenggantiSlotsMurid(slots)
-      setPenggantiHistory(history)
+      await loadPenggantiData(members)
     } catch {
       setPenggantiSlotsMurid([]); setPenggantiHistory([])
     }
@@ -80,7 +114,7 @@ export default function MuridPage() {
   const slotBaruOptions = jadwalSlots.filter((s) => s.hari === hariDariTanggalBaru)
 
   const handleSavePengganti = async () => {
-    if (!penggantiMurid) return
+    if (penggantiMurids.length === 0) return
     const slotAsal = penggantiSlotsMurid.find((s) => slotKey(s.hari, s.jam_mulai, s.kolam) === pgSlotAsalKey)
     if (!slotAsal) { showToast('Pilih jadwal asal yang mau diganti'); return }
     if (!pgTanggalAsal) { showToast('Isi tanggal yang mau di-skip'); return }
@@ -89,17 +123,19 @@ export default function MuridPage() {
     if (!slotBaru) { showToast('Pilih jam pengganti dulu'); return }
     setPgSaving(true)
     try {
-      await addJadwalPengganti({
-        murid_id: penggantiMurid.id,
-        tanggal_asal: pgTanggalAsal,
-        tanggal_baru: pgTanggalBaru,
-        jam: slotBaru.jam_mulai,
-        kolam: slotBaru.kolam,
-        keterangan: pgKeterangan.trim() || null,
-      })
+      // Berlaku buat SEMUA anak di grup ini sekaligus (paket Adik Kakak = 1 aksi utk 2 anak)
+      for (const m of penggantiMurids) {
+        await addJadwalPengganti({
+          murid_id: m.id,
+          tanggal_asal: pgTanggalAsal,
+          tanggal_baru: pgTanggalBaru,
+          jam: slotBaru.jam_mulai,
+          kolam: slotBaru.kolam,
+          keterangan: pgKeterangan.trim() || null,
+        })
+      }
       showToast('Jadwal pengganti disimpan ✓', 'success')
-      const history = await getJadwalPenggantiByMurid(penggantiMurid.id)
-      setPenggantiHistory(history)
+      await loadPenggantiData(penggantiMurids)
       setPgTanggalAsal(''); setPgTanggalBaru(''); setPgSlotBaruKey(''); setPgKeterangan('')
     } catch (e: any) {
       showToast('Gagal simpan: ' + e?.message, 'error')
@@ -109,10 +145,18 @@ export default function MuridPage() {
   }
 
   const handleDeletePengganti = async (p: JadwalPengganti) => {
-    if (!confirm('Batalkan jadwal pengganti ini? Murid balik ke jadwal asalnya di tanggal itu.')) return
+    const confirmMsg = penggantiMurids.length > 1
+      ? 'Batalkan jadwal pengganti ini untuk KEDUA anak? Mereka balik ke jadwal asalnya di tanggal itu.'
+      : 'Batalkan jadwal pengganti ini? Murid balik ke jadwal asalnya di tanggal itu.'
+    if (!confirm(confirmMsg)) return
     try {
-      await deleteJadwalPengganti(p.id)
-      setPenggantiHistory((prev) => prev.filter((x) => x.id !== p.id))
+      const targetKey = penggantiKey(p)
+      // Cari & hapus entri yang match di SEMUA anak grup ini (bukan cuma 1 record) —
+      // karena setiap anak punya row jadwal_pengganti sendiri-sendiri di database.
+      const historiesPerMember = await Promise.all(penggantiMurids.map((m) => getJadwalPenggantiByMurid(m.id)))
+      const idsToDelete = historiesPerMember.flat().filter((x) => penggantiKey(x) === targetKey).map((x) => x.id)
+      await Promise.all(idsToDelete.map((id) => deleteJadwalPengganti(id)))
+      setPenggantiHistory((prev) => prev.filter((x) => penggantiKey(x) !== targetKey))
       showToast('Jadwal pengganti dibatalkan', 'success')
     } catch (e: any) {
       showToast('Gagal batalkan: ' + e?.message, 'error')
@@ -122,7 +166,11 @@ export default function MuridPage() {
   const updateForm = (updates: Partial<typeof form>) => {
     setForm(prev => {
       const next = { ...prev, ...updates }
-      next.harga = hitungHarga(hargaSetting, next.paket, next.kategori, next.jumlah_sesi)
+      // Mode edit group: harga = total keluarga yang dikelola manual, jangan ditimpa
+      // otomatis pakai rumus harga 1 anak.
+      if (!editingGroupIds) {
+        next.harga = hitungHarga(hargaSetting, next.paket, next.kategori, next.jumlah_sesi)
+      }
       return next
     })
     if (updates.jumlah_sesi) {
@@ -152,6 +200,24 @@ export default function MuridPage() {
     (!filterHari || hariMurid(m).includes(filterHari))
   )
 
+  // Gabungkan murid Adik Kakak jadi 1 "kartu keluarga" berdasarkan kelompok_adik_kakak
+  // (= id registration asalnya). Ini murni tampilan — data Student di database TETAP
+  // terpisah per anak (absensi, edit, hapus, semua tetap per anak seperti biasa).
+  type MuridGroup = { key: string; members: Murid[] }
+  const groupedFiltered = useMemo<MuridGroup[]>(() => {
+    const byGroup: Record<string, Murid[]> = {}
+    const solo: MuridGroup[] = []
+    for (const m of filtered) {
+      if (m.kelompok_adik_kakak) {
+        (byGroup[m.kelompok_adik_kakak] ??= []).push(m)
+      } else {
+        solo.push({ key: m.id, members: [m] })
+      }
+    }
+    const groups: MuridGroup[] = Object.entries(byGroup).map(([key, members]) => ({ key, members }))
+    return [...groups, ...solo]
+  }, [filtered])
+
   const hariCount = HARI_LIST.reduce<Record<string, number>>((acc, h) => {
     acc[h] = list.filter((m) => hariMurid(m).includes(h)).length
     return acc
@@ -164,10 +230,13 @@ export default function MuridPage() {
     setJadwalPilihan([])
     setPakaiCustomPemilik(false)
     setEditingId(null)
+    setEditingGroupIds(null)
+    setGroupChildren([])
   }
 
   const openEdit = async (m: Murid) => {
     setEditingId(m.id)
+    setEditingGroupIds(null)
     const pemilikMurid = m.pemilik || 'Ilham'
     setPakaiCustomPemilik(!PEMILIK_TETAP.includes(pemilikMurid))
     setForm({
@@ -188,16 +257,80 @@ export default function MuridPage() {
     }
   }
 
+  // Edit paket Adik Kakak sebagai 1 GROUP — 1 form buat jadwal/harga/WA/pemilik
+  // yang dibagikan bersama, plus daftar nama+kategori per anak di dalamnya.
+  const openEditGroup = async (members: Murid[]) => {
+    setEditingId(null)
+    setEditingGroupIds(members.map((m) => m.id))
+    setGroupChildren(members.map((m) => ({ id: m.id, nama: m.nama, kategori: m.kategori })))
+    const first = members[0]
+    const pemilikMurid = first.pemilik || 'Ilham'
+    setPakaiCustomPemilik(!PEMILIK_TETAP.includes(pemilikMurid))
+    const totalHarga = members.reduce(
+      (sum, m) => sum + (m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4)), 0
+    )
+    setForm({
+      nama: members.map((m) => m.nama).join(' & '),
+      paket: first.paket, wa_ortu: first.wa_ortu ?? '',
+      kategori: first.kategori, jumlah_sesi: (first.jumlah_sesi as 4|8) ?? 4,
+      jadwal_hari: first.jadwal_hari ?? '', jadwal_jam: first.jadwal_jam ?? '',
+      jadwal_kolam: first.jadwal_kolam ?? KOLAM_PRESETS[0],
+      harga: totalHarga,
+      pemilik: pemilikMurid,
+    })
+    setShowAdd(true)
+    try {
+      const slots = await getMuridJadwalByMurid(first.id)
+      setJadwalPilihan(slots.map((s) => ({ hari: s.hari, jam_mulai: s.jam_mulai, kolam: s.kolam ?? '' })))
+    } catch {
+      setJadwalPilihan([])
+    }
+  }
+
+  const updateGroupChild = (id: string, updates: Partial<{ nama: string; kategori: 'normal' | 'abk' }>) => {
+    setGroupChildren((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)))
+  }
+
   const handleSave = async () => {
-    if (!form.nama.trim()) { showToast('Nama harus diisi'); return }
     if (jadwalPilihan.length === 0) { showToast('Pilih minimal 1 jadwal'); return }
     if (jadwalPilihan.length !== maxJadwal) { showToast(`Paket ${form.jumlah_sesi}x/bulan wajib pilih ${maxJadwal} jadwal`); return }
     if (pakaiCustomPemilik && !form.pemilik.trim()) { showToast('Isi dulu nama pemiliknya'); return }
+
+    const jadwalHari = jadwalPilihan.map((s) => s.hari).join(', ')
+    const jadwalJam = jadwalPilihan.map((s) => s.jam_mulai).join(', ')
+    const jadwalKolam = jadwalPilihan.map((s) => s.kolam).join(', ')
+
+    // ── Mode edit GROUP (paket Adik Kakak) — 1 form, update semua anak sekaligus ──
+    if (editingGroupIds) {
+      if (groupChildren.some((c) => !c.nama.trim())) { showToast('Nama semua anak harus diisi'); return }
+      setSaving(true)
+      try {
+        const hargaPerAnak = Math.round(form.harga / groupChildren.length)
+        for (const child of groupChildren) {
+          await updateMurid(child.id, {
+            nama: child.nama.trim(),
+            paket: form.paket,
+            wa_ortu: form.wa_ortu,
+            kategori: child.kategori,
+            jadwal_hari: jadwalHari, jadwal_jam: jadwalJam, jadwal_kolam: jadwalKolam,
+            harga: hargaPerAnak,
+            jumlah_sesi: form.jumlah_sesi,
+            pemilik: form.pemilik,
+          })
+          await replaceMuridJadwal(child.id, jadwalPilihan)
+        }
+        showToast('Paket Adik Kakak diperbarui ✓', 'success')
+        setShowAdd(false); resetForm(); load()
+      } catch (e: any) {
+        showToast('Gagal: ' + e?.message, 'error'); console.error(e)
+      } finally { setSaving(false) }
+      return
+    }
+
+    // ── Mode solo (murid biasa / tambah baru) ──
+    if (!form.nama.trim()) { showToast('Nama harus diisi'); return }
     setSaving(true)
     try {
-      const jadwalHari = jadwalPilihan.map((s) => s.hari).join(', ')
-      const jadwalJam = jadwalPilihan.map((s) => s.jam_mulai).join(', ')
-      const jadwalKolam = jadwalPilihan.map((s) => s.kolam).join(', ')
       const payload = { ...form, jadwal_hari: jadwalHari, jadwal_jam: jadwalJam, jadwal_kolam: jadwalKolam }
       if (editingId) {
         await updateMurid(editingId, payload)
@@ -217,6 +350,19 @@ export default function MuridPage() {
     if (!confirm(`Hapus ${m.nama}?`)) return
     try { await deleteMurid(m.id); showToast(`${m.nama} dihapus`); load() }
     catch (e: any) { showToast('Gagal hapus: ' + e?.message, 'error') }
+  }
+
+  // Hapus SATU PAKET Adik Kakak sekaligus — kedua anak terhapus bareng, bukan satu-satu.
+  const handleDeleteGroup = async (members: Murid[]) => {
+    const namaGabungan = members.map((m) => m.nama).join(' & ')
+    if (!confirm(`Hapus paket Adik Kakak "${namaGabungan}"? Kedua anak akan terhapus sekaligus.`)) return
+    try {
+      await Promise.all(members.map((m) => deleteMurid(m.id)))
+      showToast(`${namaGabungan} dihapus`)
+      load()
+    } catch (e: any) {
+      showToast('Gagal hapus: ' + e?.message, 'error')
+    }
   }
 
   return (
@@ -267,53 +413,124 @@ export default function MuridPage() {
       {loading && <div className="text-center py-12 text-text-muted text-sm"><i className="ti ti-loader-2 text-3xl block mb-2 animate-spin" />Memuat...</div>}
 
       <div className="flex flex-col gap-2">
-        {filtered.map((m) => (
-          <div key={m.id} className="bg-bg border border-border rounded-lg px-4 py-3 flex items-center gap-3 shadow-sm">
-            <Avatar nama={m.nama} />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <div className="text-[14px] font-semibold text-text truncate">{m.nama}</div>
-                {m.kategori === 'abk' && <span className="bg-yellow/10 text-yellow text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">ABK</span>}
-                {m.pemilik && m.pemilik !== 'Ilham' && (
-                  <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5">
-                    <i className="ti ti-building-bank text-[10px]" />{m.pemilik}
-                  </span>
-                )}
-              </div>
-              <div className="text-[12px] text-text-muted">{m.paket} · {m.jumlah_sesi ?? 4}x/bulan</div>
-              <div className="text-[12px] font-semibold text-blue mt-0.5">
-                {fmtRupiah(m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4))}/bulan
-              </div>
-              {m.jadwal_hari && (
-                <div className="text-[11px] text-blue/70 mt-0.5 flex items-center gap-1">
-                  <i className="ti ti-calendar-time text-[11px]" />
-                  {m.jadwal_hari} {m.jadwal_jam} · {m.jadwal_kolam}
+        {groupedFiltered.map((g) => {
+          if (g.members.length === 1) {
+            const m = g.members[0]
+            return (
+              <div key={g.key} className="bg-bg border border-border rounded-lg px-4 py-3 flex items-center gap-3 shadow-sm">
+                <Avatar nama={m.nama} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="text-[14px] font-semibold text-text truncate">{m.nama}</div>
+                    {m.kategori === 'abk' && <span className="bg-yellow/10 text-yellow text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">ABK</span>}
+                    {m.pemilik && m.pemilik !== 'Ilham' && (
+                      <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5">
+                        <i className="ti ti-building-bank text-[10px]" />{m.pemilik}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[12px] text-text-muted">{m.paket} · {m.jumlah_sesi ?? 4}x/bulan</div>
+                  <div className="text-[12px] font-semibold text-blue mt-0.5">
+                    {fmtRupiah(m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4))}/bulan
+                  </div>
+                  {m.jadwal_hari && (
+                    <div className="text-[11px] text-blue/70 mt-0.5 flex items-center gap-1">
+                      <i className="ti ti-calendar-time text-[11px]" />
+                      {m.jadwal_hari} {m.jadwal_jam} · {m.jadwal_kolam}
+                    </div>
+                  )}
                 </div>
-              )}
+                <div className="flex items-center gap-1.5">
+                  {m.wa_ortu && (
+                    <a href={`https://wa.me/62${m.wa_ortu.replace(/^0/, '')}`} target="_blank"
+                      className="w-8 h-8 flex items-center justify-center rounded-full bg-[#E6F1FB] text-blue hover:bg-blue hover:text-white transition-all">
+                      <i className="ti ti-brand-whatsapp text-base" />
+                    </a>
+                  )}
+                  <button onClick={() => openPengganti([m])}
+                    title="Ganti Jadwal Minggu Ini"
+                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-yellow/10 text-text-muted hover:text-yellow transition-all">
+                    <i className="ti ti-calendar-repeat text-base" />
+                  </button>
+                  <button onClick={() => openEdit(m)}
+                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
+                    <i className="ti ti-edit text-base" />
+                  </button>
+                  <button onClick={() => handleDelete(m)}
+                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
+                    <i className="ti ti-trash text-base" />
+                  </button>
+                </div>
+              </div>
+            )
+          }
+
+          // ── Kartu Keluarga (Adik Kakak) — 1 ENTITAS: semua aksi (WA, Ganti Jadwal,
+          // Edit, Hapus) berlaku buat seluruh paket sekaligus, bukan per anak. Data
+          // Student tetap 2 record di database (buat absensi & identitas per anak).
+          const namaGabungan = g.members.map((m) => m.nama).join(' & ')
+          const totalHarga = g.members.reduce((sum, m) => sum + (m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4)), 0)
+          const first = g.members[0]
+          return (
+            <div key={g.key} className="bg-bg border border-border rounded-lg px-4 py-3 shadow-sm">
+              <div className="flex items-center gap-3 mb-2.5">
+                <Avatar nama={namaGabungan} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="text-[14px] font-semibold text-text truncate">{namaGabungan}</div>
+                    <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">
+                      {g.members.length} anak
+                    </span>
+                  </div>
+                  <div className="text-[12px] text-text-muted">{first.paket} · {first.jumlah_sesi ?? 4}x/bulan</div>
+                  <div className="text-[12px] font-semibold text-blue mt-0.5">{fmtRupiah(totalHarga)}/bulan</div>
+                  {first.jadwal_hari && (
+                    <div className="text-[11px] text-blue/70 mt-0.5 flex items-center gap-1">
+                      <i className="ti ti-calendar-time text-[11px]" />
+                      {first.jadwal_hari} {first.jadwal_jam} · {first.jadwal_kolam}
+                    </div>
+                  )}
+                </div>
+                {/* Aksi GROUP — 1 tombol berlaku buat seluruh paket, bukan per anak */}
+                <div className="flex items-center gap-1.5">
+                  {first.wa_ortu && (
+                    <a href={`https://wa.me/62${first.wa_ortu.replace(/^0/, '')}`} target="_blank"
+                      title="WhatsApp orang tua"
+                      className="w-8 h-8 flex items-center justify-center rounded-full bg-[#E6F1FB] text-blue hover:bg-blue hover:text-white transition-all">
+                      <i className="ti ti-brand-whatsapp text-base" />
+                    </a>
+                  )}
+                  <button onClick={() => openPengganti(g.members)}
+                    title="Ganti Jadwal Minggu Ini — berlaku utk semua anak"
+                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-yellow/10 text-text-muted hover:text-yellow transition-all">
+                    <i className="ti ti-calendar-repeat text-base" />
+                  </button>
+                  <button onClick={() => openEditGroup(g.members)}
+                    title="Edit paket (1 form utk semua anak)"
+                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
+                    <i className="ti ti-edit text-base" />
+                  </button>
+                  <button onClick={() => handleDeleteGroup(g.members)}
+                    title="Hapus paket (kedua anak sekaligus)"
+                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
+                    <i className="ti ti-trash text-base" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Daftar anak — display-only, bukan tempat aksi (aksi ada di atas, level group) */}
+              <div className="border-t border-border pt-2 flex flex-wrap gap-1.5">
+                {g.members.map((m) => (
+                  <span key={m.id} className="inline-flex items-center gap-1 bg-bg-2 text-text text-[11px] font-medium px-2 py-1 rounded-md">
+                    <i className="ti ti-user text-[10px] text-text-muted" />
+                    {m.nama}
+                    {m.kategori === 'abk' && <span className="text-yellow font-semibold">· ABK</span>}
+                  </span>
+                ))}
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              {m.wa_ortu && (
-                <a href={`https://wa.me/62${m.wa_ortu.replace(/^0/, '')}`} target="_blank"
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-[#E6F1FB] text-blue hover:bg-blue hover:text-white transition-all">
-                  <i className="ti ti-brand-whatsapp text-base" />
-                </a>
-              )}
-              <button onClick={() => openPengganti(m)}
-                title="Ganti Jadwal Minggu Ini"
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-yellow/10 text-text-muted hover:text-yellow transition-all">
-                <i className="ti ti-calendar-repeat text-base" />
-              </button>
-              <button onClick={() => openEdit(m)}
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
-                <i className="ti ti-edit text-base" />
-              </button>
-              <button onClick={() => handleDelete(m)}
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
-                <i className="ti ti-trash text-base" />
-              </button>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {!loading && filtered.length === 0 && (
@@ -323,14 +540,43 @@ export default function MuridPage() {
         </div>
       )}
 
-      <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title={editingId ? 'Edit Murid' : 'Tambah Murid Baru'}>
+      <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }}
+        title={editingGroupIds ? 'Edit Paket Adik Kakak' : editingId ? 'Edit Murid' : 'Tambah Murid Baru'}>
         <div className="flex flex-col gap-3">
-          <div>
-            <label className="text-[12px] text-text-muted block mb-1">Nama murid</label>
-            <input type="text" placeholder="Nama lengkap" value={form.nama}
-              onChange={(e) => updateForm({ nama: e.target.value })}
-              className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
-          </div>
+          {editingGroupIds ? (
+            <div className="bg-blue-light/40 border border-blue/10 rounded-lg p-3">
+              <div className="text-[12px] font-semibold text-blue mb-2">Nama & kategori tiap anak</div>
+              <div className="flex flex-col gap-2">
+                {groupChildren.map((c, idx) => (
+                  <div key={c.id} className="flex gap-2 items-center">
+                    <input type="text" placeholder={`Nama anak ${idx + 1}`} value={c.nama}
+                      onChange={(e) => updateGroupChild(c.id, { nama: e.target.value })}
+                      className="flex-1 border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+                    <div className="flex gap-1 flex-shrink-0">
+                      {(['normal', 'abk'] as const).map((k) => (
+                        <button key={k} onClick={() => updateGroupChild(c.id, { kategori: k })}
+                          className={`px-2.5 py-2 rounded-md border text-[11px] font-medium transition-all ${c.kategori === k
+                            ? k === 'abk' ? 'bg-yellow/10 border-yellow text-yellow' : 'bg-blue-light border-blue text-blue'
+                            : 'border-border text-text-muted'}`}>
+                          {k === 'abk' ? 'ABK' : 'Normal'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[11px] text-blue/70 mt-2">
+                Jadwal, harga, WA, dan pemilik di bawah berlaku sama buat semua anak di paket ini.
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="text-[12px] text-text-muted block mb-1">Nama murid</label>
+              <input type="text" placeholder="Nama lengkap" value={form.nama}
+                onChange={(e) => updateForm({ nama: e.target.value })}
+                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+            </div>
+          )}
           <div>
             <label className="text-[12px] text-text-muted block mb-1">No. WA orang tua</label>
             <input type="tel" placeholder="08xxxxxxxxxx" value={form.wa_ortu}
@@ -338,6 +584,14 @@ export default function MuridPage() {
               className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
           </div>
 
+          {editingGroupIds ? (
+            <div>
+              <label className="text-[12px] text-text-muted block mb-1">Paket</label>
+              <div className="border border-border rounded-md px-3 py-2 text-[13px] text-text bg-bg-2">
+                {form.paket} <span className="text-text-muted text-[11px]">(tipe paket gak bisa diubah dari sini)</span>
+              </div>
+            </div>
+          ) : (
           <div>
             <label className="text-[12px] text-text-muted block mb-1.5">Paket</label>
             <div className="flex gap-2">
@@ -349,6 +603,7 @@ export default function MuridPage() {
               ))}
             </div>
           </div>
+          )}
 
           <div>
             <label className="text-[12px] text-text-muted block mb-1.5">Jumlah sesi per bulan</label>
@@ -362,6 +617,7 @@ export default function MuridPage() {
             </div>
           </div>
 
+          {!editingGroupIds && (
           <div>
             <label className="text-[12px] text-text-muted block mb-1.5">Kategori murid</label>
             <div className="grid grid-cols-2 gap-2">
@@ -376,6 +632,7 @@ export default function MuridPage() {
               ))}
             </div>
           </div>
+          )}
 
           <div>
             <label className="text-[12px] text-text-muted block mb-1.5">Pemilik (rekening penagihan)</label>
@@ -412,8 +669,10 @@ export default function MuridPage() {
 
           <div className="bg-blue-light border border-blue/20 rounded-md px-3 py-2.5">
             <div className="flex items-center justify-between mb-1.5">
-              <div className="text-[11px] text-text-muted">Harga/bulan</div>
-              <div className="text-[10px] text-blue/60">{form.paket} · {form.jumlah_sesi}x · {form.kategori === 'abk' ? 'ABK' : 'Normal'}</div>
+              <div className="text-[11px] text-text-muted">{editingGroupIds ? `Harga total/bulan (${groupChildren.length} anak)` : 'Harga/bulan'}</div>
+              <div className="text-[10px] text-blue/60">
+                {editingGroupIds ? `${form.paket} · ${form.jumlah_sesi}x` : `${form.paket} · ${form.jumlah_sesi}x · ${form.kategori === 'abk' ? 'ABK' : 'Normal'}`}
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[14px] font-semibold text-blue flex-shrink-0">Rp</span>
@@ -426,7 +685,11 @@ export default function MuridPage() {
                 placeholder="0"
               />
             </div>
-            <div className="text-[10px] text-blue/50 mt-1">Harga otomatis dari paket. Bisa diubah manual jika ada harga khusus.</div>
+            <div className="text-[10px] text-blue/50 mt-1">
+              {editingGroupIds
+                ? `Harga total keluarga — dibagi rata jadi Rp ${Math.round(form.harga / Math.max(1, groupChildren.length)).toLocaleString('id-ID')}/anak saat disimpan.`
+                : 'Harga otomatis dari paket. Bisa diubah manual jika ada harga khusus.'}
+            </div>
           </div>
 
           <div className="bg-blue-light/40 border border-blue/10 rounded-lg p-3">
@@ -482,20 +745,23 @@ export default function MuridPage() {
 
           <button onClick={handleSave} disabled={saving}
             className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-sm font-semibold mt-1 hover:bg-[#0C447C] disabled:opacity-50 transition-all">
-            {saving ? 'Menyimpan...' : (editingId ? 'Simpan Perubahan' : 'Tambah Murid')}
+            {saving ? 'Menyimpan...' : (editingGroupIds ? 'Simpan Perubahan Paket' : editingId ? 'Simpan Perubahan' : 'Tambah Murid')}
           </button>
         </div>
       </Modal>
 
-      <Modal open={showPengganti} onClose={() => setShowPengganti(false)} title={`Ganti Jadwal Minggu Ini${penggantiMurid ? ` — ${penggantiMurid.nama}` : ''}`}>
+      <Modal open={showPengganti} onClose={() => setShowPengganti(false)}
+        title={`Ganti Jadwal Minggu Ini${penggantiMurids.length ? ` — ${penggantiMurids.map((m) => m.nama).join(' & ')}` : ''}`}>
         <div className="flex flex-col gap-3">
           <div className="text-[12px] text-text-muted -mt-1">
-            Jadwal tetap murid gak berubah. Ini cuma buat 1x pengecualian — minggu depan otomatis balik ke jadwal aslinya.
+            {penggantiMurids.length > 1
+              ? 'Jadwal tetap kedua anak gak berubah. Ini cuma buat 1x pengecualian yang berlaku ke keduanya — minggu depan otomatis balik ke jadwal aslinya.'
+              : 'Jadwal tetap murid gak berubah. Ini cuma buat 1x pengecualian — minggu depan otomatis balik ke jadwal aslinya.'}
           </div>
 
           {penggantiSlotsMurid.length === 0 ? (
             <div className="text-center py-4 text-text-muted text-[12px]">
-              Murid ini belum punya jadwal tetap. Atur dulu jadwalnya lewat tombol Edit.
+              Belum ada jadwal tetap. Atur dulu jadwalnya lewat tombol Edit.
             </div>
           ) : (
             <>

@@ -91,13 +91,8 @@ export default function HariIniPage() {
     getMuridSiapTagih().then(setSiapTagihList).catch(() => {})
   }, [])
 
-  // Set status langsung dari klik tombol spesifik (bukan toggle berputar)
-  const setStatus = (sesiId: string, muridId: string, status: Absensi['status']) => {
-    setAbsenMap((prev) => ({
-      ...prev,
-      [sesiId]: { ...prev[sesiId], [muridId]: status }
-    }))
-  }
+  // Status per-murid individual digantikan setEntitasStatus (lihat bawah) —
+  // paket Adik Kakak sekarang selalu di-set bareng lewat 1 kontrol UI.
 
   const saveAbsen = async (sesiId: string) => {
     setSavingSesi(sesiId)
@@ -161,8 +156,19 @@ export default function HariIniPage() {
     finally { setSaving(false) }
   }
 
-  const hadirCount = (sesiId: string, murids: Murid[] = muridList) =>
-    murids.filter((m) => absenMap[sesiId]?.[m.id] === 'hadir').length
+  // Konfigurasi 3 tombol status
+  const STATUS_BTNS: { key: Absensi['status']; label: string; icon: string }[] = [
+    { key: 'hadir', label: 'Hadir', icon: 'ti-check' },
+    { key: 'izin',  label: 'Izin',  icon: 'ti-clock-pause' },
+    { key: 'alpha', label: 'Alpha', icon: 'ti-x' },
+  ]
+
+  const btnActiveClass = (status: Absensi['status'], current: Absensi['status'] | undefined) => {
+    const isActive = current === status
+    if (status === 'hadir') return isActive ? 'bg-blue text-white border-blue' : 'border-border text-text-muted hover:border-blue/40'
+    if (status === 'izin')  return isActive ? 'bg-yellow text-white border-yellow' : 'border-border text-text-muted hover:border-yellow/40'
+    return isActive ? 'bg-red text-white border-red' : 'border-border text-text-muted hover:border-red/40'
+  }
 
   // Cuma murid yang punya SALAH SATU jadwal (hari+jam+kolam) cocok sama sesi ini.
   // Murid dengan 2 jadwal (misal paket 8x/bulan) otomatis nongol di 2 sesi berbeda.
@@ -192,19 +198,51 @@ export default function HariIniPage() {
     return muridList.filter((m) => muridIds.has(m.id))
   }
 
-  // Konfigurasi 3 tombol status
-  const STATUS_BTNS: { key: Absensi['status']; label: string; icon: string }[] = [
-    { key: 'hadir', label: 'Hadir', icon: 'ti-check' },
-    { key: 'izin',  label: 'Izin',  icon: 'ti-clock-pause' },
-    { key: 'alpha', label: 'Alpha', icon: 'ti-x' },
-  ]
+  // ── Grouping paket Adik Kakak di absensi ──────────────────────────────────
+  // Paket Adik Kakak = 1 ENTITAS absensi, bukan 2 murid terpisah. Semua murid
+  // dengan kelompok_adik_kakak yang sama (dan sama-sama masuk sesi ini)
+  // digabung jadi 1 baris dengan 1 set tombol Hadir/Izin/Alpha.
+  type EntitasAbsensi = { key: string; members: Murid[] }
 
-  const btnActiveClass = (status: Absensi['status'], current: Absensi['status'] | undefined) => {
-    const isActive = current === status
-    if (status === 'hadir') return isActive ? 'bg-blue text-white border-blue' : 'border-border text-text-muted hover:border-blue/40'
-    if (status === 'izin')  return isActive ? 'bg-yellow text-white border-yellow' : 'border-border text-text-muted hover:border-yellow/40'
-    return isActive ? 'bg-red text-white border-red' : 'border-border text-text-muted hover:border-red/40'
+  const entitasUntukSesi = (s: Sesi): EntitasAbsensi[] => {
+    const murids = muridUntukSesi(s)
+    const seen = new Set<string>()
+    const entitas: EntitasAbsensi[] = []
+    murids.forEach((m) => {
+      const key = m.kelompok_adik_kakak || m.id
+      if (seen.has(key)) return
+      seen.add(key)
+      const members = m.kelompok_adik_kakak
+        ? murids.filter((x) => x.kelompok_adik_kakak === key)
+        : [m]
+      entitas.push({ key, members })
+    })
+    return entitas
   }
+
+  // Status gabungan 1 entitas: kalau SALAH SATU anak hadir → dianggap Hadir
+  // (prioritas hadir > izin > alpha). Ini juga yang jadi status yang di-set
+  // ke KEDUA anak sekaligus saat admin klik salah satu tombol.
+  const groupStatus = (sesiId: string, members: Murid[]): Absensi['status'] | undefined => {
+    const statuses = members.map((m) => absenMap[sesiId]?.[m.id])
+    if (statuses.some((st) => st === 'hadir')) return 'hadir'
+    if (statuses.some((st) => st === 'izin')) return 'izin'
+    if (statuses.some((st) => st === 'alpha')) return 'alpha'
+    return undefined
+  }
+
+  // Set status ke SEMUA anggota entitas sekaligus (1 klik = kedua anak ke-set,
+  // gak mungkin beda status lagi karena cuma ada 1 kontrol di UI)
+  const setEntitasStatus = (sesiId: string, members: Murid[], status: Absensi['status']) => {
+    setAbsenMap((prev) => {
+      const sesiMap = { ...prev[sesiId] }
+      members.forEach((m) => { sesiMap[m.id] = status })
+      return { ...prev, [sesiId]: sesiMap }
+    })
+  }
+
+  const hadirCountEntitas = (entitas: EntitasAbsensi[], sesiId: string) =>
+    entitas.filter((e) => groupStatus(sesiId, e.members) === 'hadir').length
 
   return (
     <div className="max-w-[720px] mx-auto">
@@ -293,9 +331,9 @@ export default function HariIniPage() {
 
       {/* Sesi cards */}
       {sesiList.map((s) => {
-        const muridSesi = muridUntukSesi(s)
-        const hadir = hadirCount(s.id, muridSesi)
-        const pct = muridSesi.length ? Math.round(hadir / muridSesi.length * 100) : 0
+        const entitas = entitasUntukSesi(s)
+        const hadir = hadirCountEntitas(entitas, s.id)
+        const pct = entitas.length ? Math.round(hadir / entitas.length * 100) : 0
         return (
           <div key={s.id} className="bg-bg border border-border rounded-lg mb-3 overflow-hidden shadow-sm">
             <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
@@ -309,7 +347,7 @@ export default function HariIniPage() {
                 <div className="text-[12px] text-text-muted">{s.kolam} · {s.durasi} menit</div>
               </div>
               <div className="ml-auto flex items-center gap-3">
-                <div className="text-[13px] text-text-muted">{hadir}/{muridSesi.length}</div>
+                <div className="text-[13px] text-text-muted">{hadir}/{entitas.length}</div>
                 <div className="w-10 h-10 relative">
                   <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
                     <circle cx="18" cy="18" r="15.9" fill="none" stroke="#E6F1FB" strokeWidth="3" />
@@ -321,28 +359,33 @@ export default function HariIniPage() {
               </div>
             </div>
 
-            {/* List murid dengan 3 tombol status — cuma murid yang jadwalnya cocok sesi ini */}
+            {/* List entitas (murid solo ATAU paket Adik Kakak digabung) dengan 3 tombol status */}
             <div className="p-3 flex flex-col gap-2">
-              {muridSesi.length === 0 && (
+              {entitas.length === 0 && (
                 <div className="text-center py-3 text-text-muted text-[12px]">Belum ada murid dengan jadwal tetap di sesi ini</div>
               )}
-              {muridSesi.map((m) => {
-                const st = absenMap[s.id]?.[m.id]
+              {entitas.map((e) => {
+                const st = groupStatus(s.id, e.members)
+                const namaGabungan = e.members.map((m) => m.nama).join(' & ')
+                const adaAbk = e.members.some((m) => m.kategori === 'abk')
                 return (
-                  <div key={m.id} className="flex items-center gap-2.5 px-2 py-1.5">
-                    <Avatar nama={m.nama} size="sm" />
+                  <div key={e.key} className="flex items-center gap-2.5 px-2 py-1.5">
+                    <Avatar nama={namaGabungan} size="sm" />
                     <div className="flex-1 min-w-0">
                       <div className="text-[13px] font-medium text-text truncate flex items-center gap-1.5">
-                        {m.nama}
-                        {m.kategori === 'abk' && <span className="text-[9px] bg-yellow/10 text-yellow px-1 py-0.5 rounded-full flex-shrink-0">ABK</span>}
+                        {namaGabungan}
+                        {adaAbk && <span className="text-[9px] bg-yellow/10 text-yellow px-1 py-0.5 rounded-full flex-shrink-0">ABK</span>}
+                        {e.members.length > 1 && (
+                          <span className="text-[9px] bg-blue-light text-blue px-1 py-0.5 rounded-full flex-shrink-0">Adik Kakak</span>
+                        )}
                       </div>
                     </div>
-                    {/* 3 tombol status — H / I / A */}
+                    {/* 3 tombol status — H / I / A, berlaku buat semua anggota entitas sekaligus */}
                     <div className="flex gap-1 flex-shrink-0">
                       {STATUS_BTNS.map((btn) => (
                         <button
                           key={btn.key}
-                          onClick={() => setStatus(s.id, m.id, btn.key)}
+                          onClick={() => setEntitasStatus(s.id, e.members, btn.key)}
                           title={btn.label}
                           className={`w-8 h-8 rounded-md border flex items-center justify-center transition-all ${btnActiveClass(btn.key, st)}`}
                         >

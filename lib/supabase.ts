@@ -322,6 +322,22 @@ export const updatePendingStatus = async (id: string, status: string) => {
   if (error) throw error
 }
 
+// Idempotent ACC — hanya berhasil kalau row masih berstatus 'menunggu'. Kalau row
+// sudah diproses sebelumnya (mis. double click / dua tab admin), .eq('status','menunggu')
+// gak akan match apapun → data null → caller tahu harus BATALIN pembuatan Student,
+// bukan lanjut insert lagi. Ini yang bikin proses ACC transaction-safe & idempotent.
+export const accPendingMemberOnce = async (id: string): Promise<PendingMember | null> => {
+  const { data, error } = await supabase
+    .from('pending_members')
+    .update({ status: 'diterima' })
+    .eq('id', id)
+    .eq('status', 'menunggu')
+    .select()
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
 // ── Tagihan ────────────────────────────────────────────────────────────────
 
 export interface Tagihan {

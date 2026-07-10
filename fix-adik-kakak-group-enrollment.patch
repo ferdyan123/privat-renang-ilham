@@ -1,0 +1,485 @@
+diff --git a/app/daftar/page.tsx b/app/daftar/page.tsx
+index 351e88a..254c1c5 100644
+--- a/app/daftar/page.tsx
++++ b/app/daftar/page.tsx
+@@ -187,24 +187,14 @@ function DaftarPublikPageContent() {
+         ? [{ nama: form.nama_murid, usia: parseInt(form.usia) }, ...anakTambahan.map((a) => ({ nama: a.nama, usia: parseInt(a.usia) }))]
+         : null
+ 
+-      if (isAdikKakak && anakList) {
+-        // Insert satu row per anak — bukan digabung jadi 1
+-        const rows = anakList.map((anak) => ({
+-          nama_murid: anak.nama,
+-          nama_ortu: form.nama_ortu, wa_ortu: form.wa_ortu, pemilik: pemilik || null,
+-          harga: Math.round(hargaSekarang / anakList.length), // bagi rata per anak
+-          paket: form.paket + (form.kategori === 'abk' ? ' +ABK' : '') + ' ' + form.jumlah_sesi + 'x' + ` (${jumlahAnakAdikKakak} anak)`,
+-          kategori: form.kategori, jadwal_hari: form.jadwal_hari, jadwal_jam: form.jadwal_jam,
+-          catatan: form.catatan || null,
+-          kode_promo: promoValid?.kode || null, diskon: promoValid ? diskonAktif : 0,
+-          anak_list: anakList, jumlah_anak: anakList.length,
+-          status: 'menunggu',
+-        }))
+-        const { error } = await supabase.from('pending_members').insert(rows)
+-        if (error) throw error
+-      } else {
+-        const { error } = await supabase.from('pending_members').insert({
+-          nama_murid: form.nama_murid,
++      // PENTING: paket Adik Kakak SELALU 1 row registration (1 group), walaupun isinya
++      // beberapa anak. Jangan insert satu row per anak — itu yang bikin Halaman Daftar
++      // tampil ganda & ACC dua kali jadi murid duplicate. Pemisahan jadi beberapa Student
++      // baru terjadi nanti saat ACC (lihat dashboard/daftar → handleAcc).
++      const namaGabungan = isAdikKakak && anakList ? anakList.map((a) => a.nama).join(' & ') : form.nama_murid
++
++      const { error } = await supabase.from('pending_members').insert({
++        nama_murid: namaGabungan,
+         usia: parseInt(form.usia),
+         nama_ortu: form.nama_ortu,
+         wa_ortu: form.wa_ortu,
+@@ -215,7 +205,7 @@ function DaftarPublikPageContent() {
+         bukti_tf_url,
+         catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Sesi: ${form.jumlah_sesi}x | Jadwal: ${jadwalRingkas} | Harga: ${fmtRupiah(hargaSekarang)}${promoValid ? ` | Promo: ${promoValid.kode} (-${fmtRupiah(diskonAktif)})` : ''}${form.catatan ? ' | ' + form.catatan : ''}`,
+         jumlah_sesi: parseInt(form.jumlah_sesi),
+-        harga: totalSetelahDiskon,
++        harga: totalSetelahDiskon, // total keluarga — pembagian per anak dilakukan saat ACC
+         kode_promo: promoValid?.kode ?? null,
+         diskon: diskonAktif,
+         anak_list: anakList,
+@@ -224,7 +214,6 @@ function DaftarPublikPageContent() {
+         pemilik,
+       })
+       if (error) throw error
+-      }
+ 
+       // Tandai kode promo sudah kepakai (kuota abis → otomatis nonaktif)
+       if (promoValid) {
+diff --git a/app/dashboard/daftar/page.tsx b/app/dashboard/daftar/page.tsx
+index 3e3f1cd..f506265 100644
+--- a/app/dashboard/daftar/page.tsx
++++ b/app/dashboard/daftar/page.tsx
+@@ -1,6 +1,6 @@
+ 'use client'
+ import { useEffect, useState } from 'react'
+-import { getPendingMembers, updatePendingStatus, addMurid, getTagihanPending, getTagihanHistory, updateTagihanStatus, zipJadwal, PendingMember } from '@/lib/supabase'
++import { getPendingMembers, updatePendingStatus, accPendingMemberOnce, addMurid, getTagihanPending, getTagihanHistory, updateTagihanStatus, zipJadwal, PendingMember } from '@/lib/supabase'
+ import { showToast } from '@/components/ui/Toast'
+ import Avatar from '@/components/ui/Avatar'
+ 
+@@ -15,6 +15,7 @@ export default function DaftarPage() {
+   const [historyFilter, setHistoryFilter] = useState<'semua' | 'lunas' | 'belum_bayar'>('semua')
+   const [loading, setLoading] = useState(false)
+   const [loadingTagihan, setLoadingTagihan] = useState(false)
++  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set())
+ 
+   const loadPendaftaran = async () => {
+     setLoading(true)
+@@ -47,60 +48,87 @@ export default function DaftarPage() {
+ 
+   const handleAcc = async (d: PendingMember) => {
+     if (!confirm(`ACC pendaftaran ${d.nama_murid}?`)) return
++    // Guard UI: tombol ACC dari row ini sedang diproses → jangan bisa diklik lagi.
++    if (processingIds.has(d.id)) return
++    setProcessingIds((prev) => new Set(prev).add(d.id))
+     try {
+-      await updatePendingStatus(d.id, 'diterima')
+-      // Kolam disimpan sebagai teks di dalam catatan (format lama), format "Kolam: Kolam A"
+-      // — dipakai sebagai fallback kalau pendaftaran ini dari SEBELUM kolom jadwal_kolam ada.
+-      const kolamMatch = d.catatan?.match(/Kolam:\s*([^|]+)/)
+-      const kolamFallback = kolamMatch ? kolamMatch[1].trim() : null
+-
+-      // Pecah jadwal gabungan ("Senin, Rabu" / "16:00, 16:00" / "Kolam A, Kolam A")
+-      // jadi beberapa baris slot — 1 murid bisa punya lebih dari 1 jadwal seminggu.
+-      const jadwalList = zipJadwal(d.jadwal_hari, d.jadwal_jam, d.jadwal_kolam).map((s) => ({
+-        ...s,
+-        kolam: s.kolam || kolamFallback,
+-      }))
+-
+-      // Kategori (normal/abk) disimpan sebagai teks "+ABK" di dalam string paket, bukan kolom terpisah
+-      const kategoriFinal: 'normal' | 'abk' = d.paket.includes('+ABK') ? 'abk' : 'normal'
+-
+-      if (d.anak_list && d.anak_list.length > 1) {
+-        // Paket Adik Kakak: buat 1 murid PER ANAK, harga total dibagi rata ke tiap anak
+-        // supaya sistem tagihan bulanan (1 tagihan = 1 murid) tetap jalan tanpa perlu diubah.
+-        const jumlahAnak = d.anak_list.length
+-        const hargaPerAnak = Math.round((d.harga ?? 0) / jumlahAnak)
+-        for (const anak of d.anak_list) {
++      // Idempotent: update status HANYA kalau row masih 'menunggu'. Kalau registration
++      // ini sudah pernah di-ACC sebelumnya (double click, race condition, dua tab admin),
++      // accepted akan null → langsung berhenti, TIDAK insert Student sama sekali.
++      const accepted = await accPendingMemberOnce(d.id)
++      if (!accepted) {
++        showToast('Pendaftaran ini sudah diproses sebelumnya', 'error')
++        loadPendaftaran()
++        return
++      }
++
++      try {
++        // Kolam disimpan sebagai teks di dalam catatan (format lama), format "Kolam: Kolam A"
++        // — dipakai sebagai fallback kalau pendaftaran ini dari SEBELUM kolom jadwal_kolam ada.
++        const kolamMatch = d.catatan?.match(/Kolam:\s*([^|]+)/)
++        const kolamFallback = kolamMatch ? kolamMatch[1].trim() : null
++
++        // Pecah jadwal gabungan ("Senin, Rabu" / "16:00, 16:00" / "Kolam A, Kolam A")
++        // jadi beberapa baris slot — 1 murid bisa punya lebih dari 1 jadwal seminggu.
++        const jadwalList = zipJadwal(d.jadwal_hari, d.jadwal_jam, d.jadwal_kolam).map((s) => ({
++          ...s,
++          kolam: s.kolam || kolamFallback,
++        }))
++
++        // Kategori (normal/abk) disimpan sebagai teks "+ABK" di dalam string paket, bukan kolom terpisah
++        const kategoriFinal: 'normal' | 'abk' = d.paket.includes('+ABK') ? 'abk' : 'normal'
++
++        if (d.anak_list && d.anak_list.length > 1) {
++          // Paket Adik Kakak = SATU registration (row ini), tapi tetap butuh 1 record
++          // Student PER ANAK karena absensi dilakukan per anak. Semua Student dari
++          // group ini ditandai kelompok_adik_kakak = registration_id (d.id) supaya
++          // Halaman Murid bisa gabungin mereka jadi 1 card lagi nanti.
++          // Harga total dibagi rata ke tiap anak supaya sistem tagihan bulanan
++          // (1 tagihan = 1 murid) tetap jalan tanpa perlu diubah.
++          const jumlahAnak = d.anak_list.length
++          const hargaPerAnak = Math.round((d.harga ?? 0) / jumlahAnak)
++          for (const anak of d.anak_list) {
++            await addMurid({
++              nama: anak.nama,
++              paket: d.paket,
++              wa_ortu: d.wa_ortu,
++              kategori: kategoriFinal,
++              jadwal_hari: d.jadwal_hari,
++              jadwal_jam: d.jadwal_jam,
++              jadwal_kolam: jadwalList[0]?.kolam ?? '',
++              harga: hargaPerAnak,
++              jumlah_sesi: d.jumlah_sesi ?? 4,
++              pemilik: d.pemilik || 'Ilham',
++              kelompok_adik_kakak: d.id,
++            }, jadwalList)
++          }
++        } else {
+           await addMurid({
+-            nama: anak.nama,
++            nama: d.nama_murid,
+             paket: d.paket,
+             wa_ortu: d.wa_ortu,
+             kategori: kategoriFinal,
+             jadwal_hari: d.jadwal_hari,
+             jadwal_jam: d.jadwal_jam,
+             jadwal_kolam: jadwalList[0]?.kolam ?? '',
+-            harga: hargaPerAnak,
++            harga: d.harga ?? 0,
+             jumlah_sesi: d.jumlah_sesi ?? 4,
+             pemilik: d.pemilik || 'Ilham',
+-            kelompok_adik_kakak: d.id,
+           }, jadwalList)
+         }
+-      } else {
+-        await addMurid({
+-          nama: d.nama_murid,
+-          paket: d.paket,
+-          wa_ortu: d.wa_ortu,
+-          kategori: kategoriFinal,
+-          jadwal_hari: d.jadwal_hari,
+-          jadwal_jam: d.jadwal_jam,
+-          jadwal_kolam: jadwalList[0]?.kolam ?? '',
+-          harga: d.harga ?? 0,
+-          jumlah_sesi: d.jumlah_sesi ?? 4,
+-          pemilik: d.pemilik || 'Ilham',
+-        }, jadwalList)
++        showToast(`${d.nama_murid} diterima ✓`, 'success')
++      } catch (errInsert) {
++        // Insert Student gagal padahal status registration udah kepencet 'diterima' —
++        // rollback biar admin bisa coba ACC lagi tanpa kejebak status "sudah diproses".
++        await updatePendingStatus(d.id, 'menunggu')
++        throw errInsert
+       }
+-      showToast(`${d.nama_murid} diterima ✓`, 'success')
+       loadPendaftaran()
+-    } catch { showToast('Gagal acc', 'error') }
++    } catch {
++      showToast('Gagal acc', 'error')
++    } finally {
++      setProcessingIds((prev) => { const next = new Set(prev); next.delete(d.id); return next })
++    }
+   }
+ 
+   const handleTolak = async (d: PendingMember) => {
+@@ -302,12 +330,22 @@ export default function DaftarPage() {
+       <div className="flex flex-col gap-3">
+         {list.map((d) => {
+           const tgl = new Date(d.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
++          const isGroup = !!(d.anak_list && d.anak_list.length > 1)
++          const headerNama = isGroup ? d.anak_list!.map((a) => a.nama).join(' & ') : d.nama_murid
++          const isProcessing = processingIds.has(d.id)
+           return (
+             <div key={d.id} className="bg-bg border border-border rounded-lg p-4 shadow-sm">
+               <div className="flex items-center gap-3 mb-3">
+-                <Avatar nama={d.nama_murid} />
++                <Avatar nama={headerNama} />
+                 <div className="flex-1 min-w-0">
+-                  <div className="text-[14px] font-semibold text-text">{d.nama_murid}</div>
++                  <div className="text-[14px] font-semibold text-text flex items-center gap-1.5 flex-wrap">
++                    {headerNama}
++                    {isGroup && (
++                      <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">
++                        {d.anak_list!.length} anak
++                      </span>
++                    )}
++                  </div>
+                   <div className="text-[12px] text-text-muted flex items-center gap-2 flex-wrap">
+                     {tgl} · {statusBadge(d.status)}
+                   </div>
+@@ -315,7 +353,9 @@ export default function DaftarPage() {
+               </div>
+               <div className="grid grid-cols-2 gap-2 mb-3">
+                 {[
+-                  { label: 'Usia', val: `${d.usia} tahun` },
++                  isGroup
++                    ? { label: 'Anak', val: d.anak_list!.map((a) => `${a.nama} (${a.usia}th)`).join(', ') }
++                    : { label: 'Usia', val: `${d.usia} tahun` },
+                   { label: 'Paket', val: d.paket },
+                   { label: 'Orang tua', val: d.nama_ortu },
+                   { label: 'No. WA', val: d.wa_ortu || '—' },
+@@ -338,13 +378,14 @@ export default function DaftarPage() {
+               )}
+               {d.status === 'menunggu' && (
+                 <div className="flex gap-2">
+-                  <button onClick={() => handleTolak(d)}
+-                    className="flex-1 flex items-center justify-center gap-1.5 border border-red/30 text-red text-[13px] font-medium py-2 rounded-md hover:bg-red/5 transition-all">
++                  <button onClick={() => handleTolak(d)} disabled={isProcessing}
++                    className="flex-1 flex items-center justify-center gap-1.5 border border-red/30 text-red text-[13px] font-medium py-2 rounded-md hover:bg-red/5 disabled:opacity-50 transition-all">
+                     <i className="ti ti-x text-sm" />Tolak
+                   </button>
+-                  <button onClick={() => handleAcc(d)}
+-                    className="flex-1 flex items-center justify-center gap-1.5 bg-green text-white text-[13px] font-semibold py-2 rounded-md hover:bg-green/90 transition-all">
+-                    <i className="ti ti-check text-sm" />ACC & Tambah Murid
++                  <button onClick={() => handleAcc(d)} disabled={isProcessing}
++                    className="flex-1 flex items-center justify-center gap-1.5 bg-green text-white text-[13px] font-semibold py-2 rounded-md hover:bg-green/90 disabled:opacity-50 transition-all">
++                    <i className={`ti ${isProcessing ? 'ti-loader-2 animate-spin' : 'ti-check'} text-sm`} />
++                    {isProcessing ? 'Memproses...' : 'ACC & Tambah Murid'}
+                   </button>
+                 </div>
+               )}
+diff --git a/app/dashboard/murid/page.tsx b/app/dashboard/murid/page.tsx
+index ffe1da1..b39c8e1 100644
+--- a/app/dashboard/murid/page.tsx
++++ b/app/dashboard/murid/page.tsx
+@@ -1,5 +1,5 @@
+ 'use client'
+-import { useEffect, useState } from 'react'
++import { useEffect, useMemo, useState } from 'react'
+ import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, getMuridJadwalByMurid, replaceMuridJadwal, getJadwalPenggantiByMurid, addJadwalPengganti, deleteJadwalPengganti, getHargaSetting, Murid, JadwalSlot, MuridJadwal, JadwalPengganti } from '@/lib/supabase'
+ import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP, fmtShort } from '@/lib/utils'
+ import { showToast } from '@/components/ui/Toast'
+@@ -152,6 +152,24 @@ export default function MuridPage() {
+     (!filterHari || hariMurid(m).includes(filterHari))
+   )
+ 
++  // Gabungkan murid Adik Kakak jadi 1 "kartu keluarga" berdasarkan kelompok_adik_kakak
++  // (= id registration asalnya). Ini murni tampilan — data Student di database TETAP
++  // terpisah per anak (absensi, edit, hapus, semua tetap per anak seperti biasa).
++  type MuridGroup = { key: string; members: Murid[] }
++  const groupedFiltered = useMemo<MuridGroup[]>(() => {
++    const byGroup: Record<string, Murid[]> = {}
++    const solo: MuridGroup[] = []
++    for (const m of filtered) {
++      if (m.kelompok_adik_kakak) {
++        (byGroup[m.kelompok_adik_kakak] ??= []).push(m)
++      } else {
++        solo.push({ key: m.id, members: [m] })
++      }
++    }
++    const groups: MuridGroup[] = Object.entries(byGroup).map(([key, members]) => ({ key, members }))
++    return [...groups, ...solo]
++  }, [filtered])
++
+   const hariCount = HARI_LIST.reduce<Record<string, number>>((acc, h) => {
+     acc[h] = list.filter((m) => hariMurid(m).includes(h)).length
+     return acc
+@@ -267,53 +285,119 @@ export default function MuridPage() {
+       {loading && <div className="text-center py-12 text-text-muted text-sm"><i className="ti ti-loader-2 text-3xl block mb-2 animate-spin" />Memuat...</div>}
+ 
+       <div className="flex flex-col gap-2">
+-        {filtered.map((m) => (
+-          <div key={m.id} className="bg-bg border border-border rounded-lg px-4 py-3 flex items-center gap-3 shadow-sm">
+-            <Avatar nama={m.nama} />
+-            <div className="flex-1 min-w-0">
+-              <div className="flex items-center gap-2">
+-                <div className="text-[14px] font-semibold text-text truncate">{m.nama}</div>
+-                {m.kategori === 'abk' && <span className="bg-yellow/10 text-yellow text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">ABK</span>}
+-                {m.pemilik && m.pemilik !== 'Ilham' && (
+-                  <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5">
+-                    <i className="ti ti-building-bank text-[10px]" />{m.pemilik}
+-                  </span>
+-                )}
+-              </div>
+-              <div className="text-[12px] text-text-muted">{m.paket} · {m.jumlah_sesi ?? 4}x/bulan</div>
+-              <div className="text-[12px] font-semibold text-blue mt-0.5">
+-                {fmtRupiah(m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4))}/bulan
++        {groupedFiltered.map((g) => {
++          if (g.members.length === 1) {
++            const m = g.members[0]
++            return (
++              <div key={g.key} className="bg-bg border border-border rounded-lg px-4 py-3 flex items-center gap-3 shadow-sm">
++                <Avatar nama={m.nama} />
++                <div className="flex-1 min-w-0">
++                  <div className="flex items-center gap-2">
++                    <div className="text-[14px] font-semibold text-text truncate">{m.nama}</div>
++                    {m.kategori === 'abk' && <span className="bg-yellow/10 text-yellow text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">ABK</span>}
++                    {m.pemilik && m.pemilik !== 'Ilham' && (
++                      <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5">
++                        <i className="ti ti-building-bank text-[10px]" />{m.pemilik}
++                      </span>
++                    )}
++                  </div>
++                  <div className="text-[12px] text-text-muted">{m.paket} · {m.jumlah_sesi ?? 4}x/bulan</div>
++                  <div className="text-[12px] font-semibold text-blue mt-0.5">
++                    {fmtRupiah(m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4))}/bulan
++                  </div>
++                  {m.jadwal_hari && (
++                    <div className="text-[11px] text-blue/70 mt-0.5 flex items-center gap-1">
++                      <i className="ti ti-calendar-time text-[11px]" />
++                      {m.jadwal_hari} {m.jadwal_jam} · {m.jadwal_kolam}
++                    </div>
++                  )}
++                </div>
++                <div className="flex items-center gap-1.5">
++                  {m.wa_ortu && (
++                    <a href={`https://wa.me/62${m.wa_ortu.replace(/^0/, '')}`} target="_blank"
++                      className="w-8 h-8 flex items-center justify-center rounded-full bg-[#E6F1FB] text-blue hover:bg-blue hover:text-white transition-all">
++                      <i className="ti ti-brand-whatsapp text-base" />
++                    </a>
++                  )}
++                  <button onClick={() => openPengganti(m)}
++                    title="Ganti Jadwal Minggu Ini"
++                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-yellow/10 text-text-muted hover:text-yellow transition-all">
++                    <i className="ti ti-calendar-repeat text-base" />
++                  </button>
++                  <button onClick={() => openEdit(m)}
++                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
++                    <i className="ti ti-edit text-base" />
++                  </button>
++                  <button onClick={() => handleDelete(m)}
++                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
++                    <i className="ti ti-trash text-base" />
++                  </button>
++                </div>
+               </div>
+-              {m.jadwal_hari && (
+-                <div className="text-[11px] text-blue/70 mt-0.5 flex items-center gap-1">
+-                  <i className="ti ti-calendar-time text-[11px]" />
+-                  {m.jadwal_hari} {m.jadwal_jam} · {m.jadwal_kolam}
++            )
++          }
++
++          // ── Kartu Keluarga (Adik Kakak) — gabungan tampilan, data Student tetap per anak ──
++          const namaGabungan = g.members.map((m) => m.nama).join(' & ')
++          const totalHarga = g.members.reduce((sum, m) => sum + (m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4)), 0)
++          const first = g.members[0]
++          return (
++            <div key={g.key} className="bg-bg border border-border rounded-lg px-4 py-3 shadow-sm">
++              <div className="flex items-center gap-3 mb-2.5">
++                <Avatar nama={namaGabungan} />
++                <div className="flex-1 min-w-0">
++                  <div className="flex items-center gap-2 flex-wrap">
++                    <div className="text-[14px] font-semibold text-text truncate">{namaGabungan}</div>
++                    <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">
++                      {g.members.length} anak
++                    </span>
++                  </div>
++                  <div className="text-[12px] text-text-muted">{first.paket} · {first.jumlah_sesi ?? 4}x/bulan</div>
++                  <div className="text-[12px] font-semibold text-blue mt-0.5">{fmtRupiah(totalHarga)}/bulan</div>
++                  {first.jadwal_hari && (
++                    <div className="text-[11px] text-blue/70 mt-0.5 flex items-center gap-1">
++                      <i className="ti ti-calendar-time text-[11px]" />
++                      {first.jadwal_hari} {first.jadwal_jam} · {first.jadwal_kolam}
++                    </div>
++                  )}
+                 </div>
+-              )}
+-            </div>
+-            <div className="flex items-center gap-1.5">
+-              {m.wa_ortu && (
+-                <a href={`https://wa.me/62${m.wa_ortu.replace(/^0/, '')}`} target="_blank"
+-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-[#E6F1FB] text-blue hover:bg-blue hover:text-white transition-all">
+-                  <i className="ti ti-brand-whatsapp text-base" />
+-                </a>
+-              )}
+-              <button onClick={() => openPengganti(m)}
+-                title="Ganti Jadwal Minggu Ini"
+-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-yellow/10 text-text-muted hover:text-yellow transition-all">
+-                <i className="ti ti-calendar-repeat text-base" />
+-              </button>
+-              <button onClick={() => openEdit(m)}
+-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
+-                <i className="ti ti-edit text-base" />
+-              </button>
+-              <button onClick={() => handleDelete(m)}
+-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
+-                <i className="ti ti-trash text-base" />
+-              </button>
++              </div>
++
++              <div className="border-t border-border pt-2 flex flex-col gap-1.5">
++                {g.members.map((m) => (
++                  <div key={m.id} className="flex items-center gap-2.5 bg-bg-2 rounded-md px-2.5 py-2">
++                    <Avatar nama={m.nama} size="sm" />
++                    <div className="flex-1 min-w-0 flex items-center gap-2">
++                      <div className="text-[12px] font-semibold text-text truncate">{m.nama}</div>
++                      {m.kategori === 'abk' && <span className="bg-yellow/10 text-yellow text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">ABK</span>}
++                    </div>
++                    <div className="flex items-center gap-1">
++                      {m.wa_ortu && (
++                        <a href={`https://wa.me/62${m.wa_ortu.replace(/^0/, '')}`} target="_blank"
++                          className="w-7 h-7 flex items-center justify-center rounded-full bg-[#E6F1FB] text-blue hover:bg-blue hover:text-white transition-all">
++                          <i className="ti ti-brand-whatsapp text-sm" />
++                        </a>
++                      )}
++                      <button onClick={() => openPengganti(m)}
++                        title="Ganti Jadwal Minggu Ini — per anak"
++                        className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-yellow/10 text-text-muted hover:text-yellow transition-all">
++                        <i className="ti ti-calendar-repeat text-sm" />
++                      </button>
++                      <button onClick={() => openEdit(m)}
++                        className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-blue/10 text-text-muted hover:text-blue transition-all">
++                        <i className="ti ti-edit text-sm" />
++                      </button>
++                      <button onClick={() => handleDelete(m)}
++                        className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
++                        <i className="ti ti-trash text-sm" />
++                      </button>
++                    </div>
++                  </div>
++                ))}
++              </div>
+             </div>
+-          </div>
+-        ))}
++          )
++        })}
+       </div>
+ 
+       {!loading && filtered.length === 0 && (
+diff --git a/lib/supabase.ts b/lib/supabase.ts
+index ca13140..7c11efb 100644
+--- a/lib/supabase.ts
++++ b/lib/supabase.ts
+@@ -322,6 +322,22 @@ export const updatePendingStatus = async (id: string, status: string) => {
+   if (error) throw error
+ }
+ 
++// Idempotent ACC — hanya berhasil kalau row masih berstatus 'menunggu'. Kalau row
++// sudah diproses sebelumnya (mis. double click / dua tab admin), .eq('status','menunggu')
++// gak akan match apapun → data null → caller tahu harus BATALIN pembuatan Student,
++// bukan lanjut insert lagi. Ini yang bikin proses ACC transaction-safe & idempotent.
++export const accPendingMemberOnce = async (id: string): Promise<PendingMember | null> => {
++  const { data, error } = await supabase
++    .from('pending_members')
++    .update({ status: 'diterima' })
++    .eq('id', id)
++    .eq('status', 'menunggu')
++    .select()
++    .maybeSingle()
++  if (error) throw error
++  return data
++}
++
+ // ── Tagihan ────────────────────────────────────────────────────────────────
+ 
+ export interface Tagihan {
