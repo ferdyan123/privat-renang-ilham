@@ -14,8 +14,8 @@ const NAV = [
   { tab: 'rekap',      href: '/dashboard/rekap',     icon: 'ti-chart-bar',      label: 'Rekap' },
   { tab: 'grafik',     href: '/dashboard/grafik',    icon: 'ti-chart-line',     label: 'Grafik' },
   { tab: 'kirim',      href: '/dashboard/kirim',     icon: 'ti-send',           label: 'Kirim' },
-  { tab: 'daftar',     href: '/dashboard/daftar',    icon: 'ti-user-plus',      label: 'Daftar', badge: true },
   { tab: 'slot',       href: '/dashboard/slot',     icon: 'ti-calendar-event',  label: 'Slot' },
+  { tab: 'daftar',     href: '/dashboard/daftar',    icon: 'ti-user-plus',      label: 'Daftar', badge: true },
   { tab: 'promo',      href: '/dashboard/promo',    icon: 'ti-discount-2',      label: 'Promo' },
   { tab: 'pemasukan',  href: '/dashboard/pemasukan', icon: 'ti-cash',            label: 'Pemasukan' },
 ]

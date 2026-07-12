@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
-import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, getMuridJadwalByMurid, replaceMuridJadwal, getJadwalPenggantiByMurid, addJadwalPengganti, deleteJadwalPengganti, getHargaSetting, Murid, JadwalSlot, MuridJadwal, JadwalPengganti } from '@/lib/supabase'
+import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, getMuridJadwalByMurid, replaceMuridJadwal, getJadwalPenggantiByMurid, addJadwalPengganti, deleteJadwalPengganti, getHargaSetting, getPeriodeBerjalan, Murid, JadwalSlot, MuridJadwal, JadwalPengganti, PeriodeInfo } from '@/lib/supabase'
 import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP, fmtShort } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
@@ -10,6 +10,8 @@ const HARI_LIST = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu
 
 export default function MuridPage() {
   const [list, setList] = useState<Murid[]>([])
+  const [periodeMap, setPeriodeMap] = useState<Record<string, PeriodeInfo>>({})  // murid_id → PeriodeInfo
+  const [loadingPeriode, setLoadingPeriode] = useState(false)
   const [search, setSearch] = useState('')
   const [filterHari, setFilterHari] = useState('')
   const [loading, setLoading] = useState(true)
@@ -35,6 +37,28 @@ export default function MuridPage() {
   // dikelola terpisah lewat groupChildren (form.nama cuma dipakai buat header display).
   const [editingGroupIds, setEditingGroupIds] = useState<string[] | null>(null)
   const [groupChildren, setGroupChildren] = useState<{ id: string; nama: string; kategori: 'normal' | 'abk' }[]>([])
+
+  // Mode TAMBAH Adik Kakak baru (bukan edit) — pakai newGroupChildren terpisah
+  // supaya tidak confuse dengan editingGroupIds (yang punya real murid.id)
+  const isAddingAdikKakak = !editingGroupIds && !editingId && form.paket === 'Adik Kakak'
+  const [newGroupChildren, setNewGroupChildren] = useState<{ tempId: string; nama: string; kategori: 'normal' | 'abk' }[]>([
+    { tempId: '1', nama: '', kategori: 'normal' },
+    { tempId: '2', nama: '', kategori: 'normal' },
+  ])
+
+  const updateNewGroupChild = (tempId: string, updates: Partial<{ nama: string; kategori: 'normal' | 'abk' }>) => {
+    setNewGroupChildren((prev) => prev.map((c) => c.tempId === tempId ? { ...c, ...updates } : c))
+  }
+
+  const addNewGroupChild = () => {
+    if (newGroupChildren.length >= 5) return
+    setNewGroupChildren((prev) => [...prev, { tempId: Date.now().toString(), nama: '', kategori: 'normal' }])
+  }
+
+  const removeNewGroupChild = (tempId: string) => {
+    if (newGroupChildren.length <= 2) return
+    setNewGroupChildren((prev) => prev.filter((c) => c.tempId !== tempId))
+  }
 
   // Bisa pilih lebih dari 1 jadwal (misal paket 8x/bulan = 2x seminggu)
   const [jadwalPilihan, setJadwalPilihan] = useState<{ hari: string; jam_mulai: string; kolam: string }[]>([])
@@ -181,9 +205,48 @@ export default function MuridPage() {
 
   const load = async () => {
     setLoading(true)
-    try { setList(await getMurid()) }
+    try {
+      const murid = await getMurid()
+      setList(murid)
+      loadPeriodeAll(murid)
+    }
     catch (e: any) { showToast('Gagal load murid: ' + e?.message, 'error') }
     finally { setLoading(false) }
+  }
+
+  // Load masa berlaku semua murid paralel di background — tidak block render utama.
+  // Untuk Adik Kakak: 1x query per kelompok, hasilnya di-share ke semua anggota.
+  const loadPeriodeAll = async (murid: Murid[]) => {
+    setLoadingPeriode(true)
+    try {
+      const seen = new Set<string>()
+      const tasks: { ids: string[]; rep: Murid }[] = []
+      murid.forEach((m) => {
+        const key = m.kelompok_adik_kakak || m.id
+        if (seen.has(key)) return
+        seen.add(key)
+        const members = m.kelompok_adik_kakak
+          ? murid.filter((x) => x.kelompok_adik_kakak === key)
+          : [m]
+        tasks.push({ ids: members.map((x) => x.id), rep: members[0] })
+      })
+      const results = await Promise.allSettled(
+        tasks.map((t) => getPeriodeBerjalan(
+          t.rep.id,
+          t.rep.paket,
+          t.rep.jumlah_sesi ?? undefined,
+          t.ids.filter((id) => id !== t.rep.id)  // extra ids = anggota lain di group
+        ))
+      )
+      const map: Record<string, PeriodeInfo> = {}
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') {
+          tasks[i].ids.forEach((id) => { map[id] = r.value })
+        }
+      })
+      setPeriodeMap(map)
+    } catch { /* non-critical */ }
+    finally { setLoadingPeriode(false) }
   }
 
   useEffect(() => {
@@ -232,6 +295,10 @@ export default function MuridPage() {
     setEditingId(null)
     setEditingGroupIds(null)
     setGroupChildren([])
+    setNewGroupChildren([
+      { tempId: '1', nama: '', kategori: 'normal' },
+      { tempId: '2', nama: '', kategori: 'normal' },
+    ])
   }
 
   const openEdit = async (m: Murid) => {
@@ -327,6 +394,41 @@ export default function MuridPage() {
       return
     }
 
+    // ── Mode TAMBAH Adik Kakak baru ──
+    if (isAddingAdikKakak) {
+      if (newGroupChildren.some((c) => !c.nama.trim())) { showToast('Nama semua anak harus diisi'); return }
+      setSaving(true)
+      try {
+        const hargaPerAnak = Math.round(form.harga / newGroupChildren.length)
+        // Buat semua anak sekaligus, kumpulkan id mereka
+        const muridIds: string[] = []
+        for (const child of newGroupChildren) {
+          const payload = {
+            nama: child.nama.trim(),
+            paket: form.paket,
+            wa_ortu: form.wa_ortu,
+            kategori: child.kategori,
+            jadwal_hari: jadwalHari, jadwal_jam: jadwalJam, jadwal_kolam: jadwalKolam,
+            harga: hargaPerAnak,
+            jumlah_sesi: form.jumlah_sesi,
+            pemilik: form.pemilik,
+          }
+          const newMurid = await addMurid(payload, jadwalPilihan)
+          muridIds.push(newMurid.id)
+        }
+        // Set kelompok_adik_kakak ke id murid pertama (jadi semua anggota group punya link yg sama)
+        const groupKey = muridIds[0]
+        await Promise.all(muridIds.map((id) =>
+          updateMurid(id, { kelompok_adik_kakak: groupKey })
+        ))
+        showToast(`Paket Adik Kakak ${newGroupChildren.map((c) => c.nama).join(' & ')} ditambahkan ✓`, 'success')
+        setShowAdd(false); resetForm(); load()
+      } catch (e: any) {
+        showToast('Gagal: ' + e?.message, 'error'); console.error(e)
+      } finally { setSaving(false) }
+      return
+    }
+
     // ── Mode solo (murid biasa / tambah baru) ──
     if (!form.nama.trim()) { showToast('Nama harus diisi'); return }
     setSaving(true)
@@ -363,6 +465,41 @@ export default function MuridPage() {
     } catch (e: any) {
       showToast('Gagal hapus: ' + e?.message, 'error')
     }
+  }
+
+  // ── PeriodeBadge — info sisa hari masa berlaku paket ─────────────────────
+  const PeriodeBadge = ({ muridId }: { muridId: string }) => {
+    const info = periodeMap[muridId]
+    if (!info && loadingPeriode) return <div className="text-[10px] text-text-muted animate-pulse mt-0.5">memuat...</div>
+    if (!info) return null
+
+    if (info.isExpired) {
+      return (
+        <div className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-red bg-red/10 px-2 py-0.5 rounded-full w-fit">
+          <i className="ti ti-clock-x text-[10px]" />Masa berlaku habis
+        </div>
+      )
+    }
+
+    const sisa = info.sisaHari
+    let color = 'text-green bg-green/10'
+    if (sisa <= 3)  color = 'text-red bg-red/10'
+    else if (sisa <= 7)  color = 'text-orange-500 bg-orange-50'
+    else if (sisa <= 14) color = 'text-yellow bg-yellow/10'
+
+    const label = sisa <= 3 ? `Hangus dalam ${sisa} hari` : `Sisa ${sisa} hari`
+
+    return (
+      <div className="mt-1 flex items-center gap-2 flex-wrap">
+        <div className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full w-fit ${color}`}>
+          <i className="ti ti-calendar-clock text-[10px]" />{label}
+        </div>
+        <span className="text-[10px] text-text-muted">
+          {info.jumlahHadir}/{info.jumlahTarget} hadir
+          {info.jumlahSakit > 0 && <span className="ml-1 text-purple-500">+{info.jumlahSakit * 7}hr (sakit)</span>}
+        </span>
+      </div>
+    )
   }
 
   return (
@@ -439,6 +576,7 @@ export default function MuridPage() {
                       {m.jadwal_hari} {m.jadwal_jam} · {m.jadwal_kolam}
                     </div>
                   )}
+                  <PeriodeBadge muridId={m.id} />
                 </div>
                 <div className="flex items-center gap-1.5">
                   {m.wa_ortu && (
@@ -490,6 +628,8 @@ export default function MuridPage() {
                       {first.jadwal_hari} {first.jadwal_jam} · {first.jadwal_kolam}
                     </div>
                   )}
+                  {/* PeriodeBadge 1x untuk whole group — pakai first.id karena semua anggota share info yang sama */}
+                  <PeriodeBadge muridId={first.id} />
                 </div>
                 {/* Aksi GROUP — 1 tombol berlaku buat seluruh paket, bukan per anak */}
                 <div className="flex items-center gap-1.5">
@@ -541,9 +681,12 @@ export default function MuridPage() {
       )}
 
       <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }}
-        title={editingGroupIds ? 'Edit Paket Adik Kakak' : editingId ? 'Edit Murid' : 'Tambah Murid Baru'}>
+        title={editingGroupIds ? 'Edit Paket Adik Kakak' : isAddingAdikKakak ? 'Tambah Paket Adik Kakak' : editingId ? 'Edit Murid' : 'Tambah Murid Baru'}>
         <div className="flex flex-col gap-3">
+
+          {/* ── Section nama: berbeda tergantung mode ── */}
           {editingGroupIds ? (
+            // Edit group existing
             <div className="bg-blue-light/40 border border-blue/10 rounded-lg p-3">
               <div className="text-[12px] font-semibold text-blue mb-2">Nama & kategori tiap anak</div>
               <div className="flex flex-col gap-2">
@@ -569,7 +712,47 @@ export default function MuridPage() {
                 Jadwal, harga, WA, dan pemilik di bawah berlaku sama buat semua anak di paket ini.
               </div>
             </div>
+          ) : isAddingAdikKakak ? (
+            // Tambah group baru
+            <div className="bg-blue-light/40 border border-blue/10 rounded-lg p-3">
+              <div className="text-[12px] font-semibold text-blue mb-2">Nama & kategori tiap anak</div>
+              <div className="flex flex-col gap-2">
+                {newGroupChildren.map((c, idx) => (
+                  <div key={c.tempId} className="flex gap-2 items-center">
+                    <input type="text" placeholder={`Nama anak ${idx + 1}`} value={c.nama}
+                      onChange={(e) => updateNewGroupChild(c.tempId, { nama: e.target.value })}
+                      className="flex-1 border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+                    <div className="flex gap-1 flex-shrink-0">
+                      {(['normal', 'abk'] as const).map((k) => (
+                        <button key={k} onClick={() => updateNewGroupChild(c.tempId, { kategori: k })}
+                          className={`px-2.5 py-2 rounded-md border text-[11px] font-medium transition-all ${c.kategori === k
+                            ? k === 'abk' ? 'bg-yellow/10 border-yellow text-yellow' : 'bg-blue-light border-blue text-blue'
+                            : 'border-border text-text-muted'}`}>
+                          {k === 'abk' ? 'ABK' : 'Normal'}
+                        </button>
+                      ))}
+                    </div>
+                    {newGroupChildren.length > 2 && (
+                      <button onClick={() => removeNewGroupChild(c.tempId)}
+                        className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-full hover:bg-red/10 text-text-muted hover:text-red transition-all">
+                        <i className="ti ti-x text-sm" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {newGroupChildren.length < 5 && (
+                <button onClick={addNewGroupChild}
+                  className="mt-2 flex items-center gap-1.5 text-[11px] text-blue hover:text-blue/80 font-medium transition-all">
+                  <i className="ti ti-plus text-[11px]" />Tambah anak
+                </button>
+              )}
+              <div className="text-[11px] text-blue/70 mt-2">
+                Jadwal, harga, WA, dan pemilik di bawah berlaku sama buat semua anak di paket ini.
+              </div>
+            </div>
           ) : (
+            // Solo murid biasa
             <div>
               <label className="text-[12px] text-text-muted block mb-1">Nama murid</label>
               <input type="text" placeholder="Nama lengkap" value={form.nama}
@@ -577,6 +760,7 @@ export default function MuridPage() {
                 className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
             </div>
           )}
+
           <div>
             <label className="text-[12px] text-text-muted block mb-1">No. WA orang tua</label>
             <input type="tel" placeholder="08xxxxxxxxxx" value={form.wa_ortu}
@@ -595,9 +779,9 @@ export default function MuridPage() {
           <div>
             <label className="text-[12px] text-text-muted block mb-1.5">Paket</label>
             <div className="flex gap-2">
-              {PAKET_LIST.map((p) => (
+              {(['Semi Privat', 'Eksklusif', 'Adik Kakak'] as const).map((p) => (
                 <button key={p} onClick={() => updateForm({ paket: p })}
-                  className={`flex-1 py-2 rounded-md border text-[13px] font-medium transition-all ${form.paket === p ? 'bg-blue-light border-blue text-blue' : 'border-border text-text-muted'}`}>
+                  className={`flex-1 py-2 rounded-md border text-[12px] font-medium transition-all ${form.paket === p ? 'bg-blue-light border-blue text-blue' : 'border-border text-text-muted'}`}>
                   {p}
                 </button>
               ))}
@@ -617,7 +801,7 @@ export default function MuridPage() {
             </div>
           </div>
 
-          {!editingGroupIds && (
+          {!editingGroupIds && !isAddingAdikKakak && (
           <div>
             <label className="text-[12px] text-text-muted block mb-1.5">Kategori murid</label>
             <div className="grid grid-cols-2 gap-2">
@@ -669,7 +853,11 @@ export default function MuridPage() {
 
           <div className="bg-blue-light border border-blue/20 rounded-md px-3 py-2.5">
             <div className="flex items-center justify-between mb-1.5">
-              <div className="text-[11px] text-text-muted">{editingGroupIds ? `Harga total/bulan (${groupChildren.length} anak)` : 'Harga/bulan'}</div>
+              <div className="text-[11px] text-text-muted">
+                {(editingGroupIds || isAddingAdikKakak)
+                  ? `Harga total/bulan (${editingGroupIds ? groupChildren.length : newGroupChildren.length} anak)`
+                  : 'Harga/bulan'}
+              </div>
               <div className="text-[10px] text-blue/60">
                 {editingGroupIds ? `${form.paket} · ${form.jumlah_sesi}x` : `${form.paket} · ${form.jumlah_sesi}x · ${form.kategori === 'abk' ? 'ABK' : 'Normal'}`}
               </div>
@@ -686,8 +874,8 @@ export default function MuridPage() {
               />
             </div>
             <div className="text-[10px] text-blue/50 mt-1">
-              {editingGroupIds
-                ? `Harga total keluarga — dibagi rata jadi Rp ${Math.round(form.harga / Math.max(1, groupChildren.length)).toLocaleString('id-ID')}/anak saat disimpan.`
+              {(editingGroupIds || isAddingAdikKakak)
+                ? `Harga total keluarga — dibagi rata jadi Rp ${Math.round(form.harga / Math.max(1, editingGroupIds ? groupChildren.length : newGroupChildren.length)).toLocaleString('id-ID')}/anak saat disimpan.`
                 : 'Harga otomatis dari paket. Bisa diubah manual jika ada harga khusus.'}
             </div>
           </div>
@@ -745,7 +933,7 @@ export default function MuridPage() {
 
           <button onClick={handleSave} disabled={saving}
             className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-sm font-semibold mt-1 hover:bg-[#0C447C] disabled:opacity-50 transition-all">
-            {saving ? 'Menyimpan...' : (editingGroupIds ? 'Simpan Perubahan Paket' : editingId ? 'Simpan Perubahan' : 'Tambah Murid')}
+            {saving ? 'Menyimpan...' : (editingGroupIds ? 'Simpan Perubahan Paket' : isAddingAdikKakak ? 'Tambah Paket Adik Kakak' : editingId ? 'Simpan Perubahan' : 'Tambah Murid')}
           </button>
         </div>
       </Modal>

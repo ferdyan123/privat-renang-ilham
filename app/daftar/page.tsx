@@ -6,7 +6,7 @@ import { DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, hitungHargaAdikKakak,
 import { ToastProvider, showToast } from '@/components/ui/Toast'
 
 const KELAS_LIST = [
-  { id: 'semi_privat', label: 'Semi Privat', desc: 'Belajar bersama 2-3 anak seusia' },
+  { id: 'semi_privat', label: 'Semi Privat', desc: 'Belajar bersama dengan maks 4 anak' },
   { id: 'eksklusif', label: 'Eksklusif', desc: 'Sesi khusus 1-on-1 dengan instruktur' },
   { id: 'adik_kakak', label: 'Adik Kakak', desc: '2-5 bersaudara sekaligus, hemat per anak' },
 ]
@@ -369,7 +369,6 @@ function DaftarPublikPageContent() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <div className="text-[13px] font-semibold text-gray-800">Anak ABK</div>
-                          <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full font-bold">+Rp 50.000</span>
                         </div>
                         <div className="text-[11px] text-gray-400">Autisme, ADHD, speech delay, dsb</div>
                       </div>

@@ -156,17 +156,20 @@ export default function HariIniPage() {
     finally { setSaving(false) }
   }
 
-  // Konfigurasi 3 tombol status
+  // Konfigurasi 4 tombol status — H / S / I / A
+  // 'sakit' menambah +7 hari masa berlaku paket (lihat getPeriodeBerjalan di supabase.ts)
   const STATUS_BTNS: { key: Absensi['status']; label: string; icon: string }[] = [
-    { key: 'hadir', label: 'Hadir', icon: 'ti-check' },
-    { key: 'izin',  label: 'Izin',  icon: 'ti-clock-pause' },
-    { key: 'alpha', label: 'Alpha', icon: 'ti-x' },
+    { key: 'hadir', label: 'Hadir',  icon: 'ti-check' },
+    { key: 'sakit', label: 'Sakit',  icon: 'ti-heart-broken' },
+    { key: 'izin',  label: 'Izin',   icon: 'ti-clock-pause' },
+    { key: 'alpha', label: 'Alpha',  icon: 'ti-x' },
   ]
 
   const btnActiveClass = (status: Absensi['status'], current: Absensi['status'] | undefined) => {
     const isActive = current === status
-    if (status === 'hadir') return isActive ? 'bg-blue text-white border-blue' : 'border-border text-text-muted hover:border-blue/40'
-    if (status === 'izin')  return isActive ? 'bg-yellow text-white border-yellow' : 'border-border text-text-muted hover:border-yellow/40'
+    if (status === 'hadir') return isActive ? 'bg-blue text-white border-blue'         : 'border-border text-text-muted hover:border-blue/40'
+    if (status === 'sakit') return isActive ? 'bg-purple-500 text-white border-purple-500' : 'border-border text-text-muted hover:border-purple-400/60'
+    if (status === 'izin')  return isActive ? 'bg-yellow text-white border-yellow'     : 'border-border text-text-muted hover:border-yellow/40'
     return isActive ? 'bg-red text-white border-red' : 'border-border text-text-muted hover:border-red/40'
   }
 
@@ -221,11 +224,12 @@ export default function HariIniPage() {
   }
 
   // Status gabungan 1 entitas: kalau SALAH SATU anak hadir → dianggap Hadir
-  // (prioritas hadir > izin > alpha). Ini juga yang jadi status yang di-set
-  // ke KEDUA anak sekaligus saat admin klik salah satu tombol.
+  // Prioritas: hadir > sakit > izin > alpha
+  // Sakit tetap dianggap "tidak hadir" untuk keperluan absensi tapi +7 hari masa berlaku
   const groupStatus = (sesiId: string, members: Murid[]): Absensi['status'] | undefined => {
     const statuses = members.map((m) => absenMap[sesiId]?.[m.id])
     if (statuses.some((st) => st === 'hadir')) return 'hadir'
+    if (statuses.some((st) => st === 'sakit')) return 'sakit'
     if (statuses.some((st) => st === 'izin')) return 'izin'
     if (statuses.some((st) => st === 'alpha')) return 'alpha'
     return undefined

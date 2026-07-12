@@ -37,7 +37,7 @@ export interface Absensi {
   id: string
   sesi_id: string
   murid_id: string
-  status: 'hadir' | 'izin' | 'alpha'
+  status: 'hadir' | 'izin' | 'alpha' | 'sakit'
 }
 
 export interface MuridJadwal {
@@ -351,6 +351,7 @@ export interface Tagihan {
   total_harga: number
   created_at: string
   paid_at: string | null
+  tanggal_mulai?: string | null  // tanggal sesi pertama di siklus ini (basis hitung 44 hari)
 }
 
 export const getTagihanByMurid = async (muridId: string): Promise<Tagihan[]> => {
@@ -434,7 +435,149 @@ export const getSiklusBerjalan = async (muridId: string, paket: string, jumlahSe
   }
 }
 
-// ── Pembayaran (history konfirmasi) ───────────────────────────────────────
+// ── Logika Masa Berlaku Paket (44 hari + ekstensi sakit) ──────────────────
+//
+// Setiap siklus/periode punya masa berlaku 44 hari dari tanggal_mulai.
+// Status 'sakit' di absensi menambah +7 hari per kejadian.
+// Status 'izin' dan 'alpha' TIDAK menambah masa berlaku.
+//
+// Reset terjadi jika:
+//   (a) tanggal hari ini > tanggal_mulai + 44 + (jumlah_sakit × 7)  → reset karena expired
+//   (b) sudah hadir sejumlah target (4x/8x) DAN ada tagihan periode berikutnya yang lunas
+//       → reset karena kuota habis & sudah bayar
+//
+// Fungsi ini mengembalikan info lengkap periode berjalan untuk 1 murid.
+
+export interface PeriodeInfo {
+  tanggalMulai: string        // selalu ada (fallback ke created_at atau today)
+  tanggalExpiry: string       // selalu ada
+  sisaHari: number            // selalu ada (bisa negatif kalau expired)
+  jumlahHadir: number
+  jumlahSakit: number
+  jumlahTarget: number
+  siapTagih: boolean
+  isExpired: boolean
+  isResetKarenaLunas: boolean
+  siklusBerikutnya: number
+  sesiHadir: string[]
+}
+
+const addDays = (dateStr: string, days: number): string => {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+const diffDays = (from: string, to: string): number => {
+  const a = new Date(from + 'T00:00:00').getTime()
+  const b = new Date(to + 'T00:00:00').getTime()
+  return Math.round((b - a) / 86400000)
+}
+
+export const getPeriodeBerjalan = async (muridId: string, paket: string, jumlahSesiOverride?: number, extraMuridIds?: string[]): Promise<PeriodeInfo> => {
+  const jumlahTarget = jumlahSesiOverride ?? (paket.includes('8') ? 8 : 4)
+  const today = new Date().toISOString().slice(0, 10)
+  // Untuk Adik Kakak: gabungkan semua murid_id anggota group supaya absensi
+  // dari anak manapun bisa jadi acuan tanggal mulai periode
+  const allMuridIds = [muridId, ...(extraMuridIds ?? [])].filter((id, i, arr) => arr.indexOf(id) === i)
+
+  // Ambil tagihan dari murid representative (muridId) saja — tagihan selalu atas nama 1 murid
+  const { data: tagihanAll } = await supabase
+    .from('tagihan')
+    .select('sesi_ids, siklus, status, paid_at, tanggal_mulai')
+    .eq('murid_id', muridId)
+    .in('status', ['lunas', 'menunggu_konfirmasi'])
+    .order('siklus', { ascending: false })
+
+  const tagihanLunas = (tagihanAll ?? []) as any[]
+  const sudahDibayarIds = new Set<string>(tagihanLunas.flatMap((t) => t.sesi_ids ?? []))
+  const siklusBerikutnya = tagihanLunas.length > 0 ? tagihanLunas[0].siklus + 1 : 1
+
+  // Ambil absensi dari SEMUA anggota group (Adik Kakak: 2 anak, solo: 1 murid)
+  // supaya tanggal sesi pertama bisa terdeteksi walaupun representative belum punya absensi
+  const { data: absenAll } = await supabase
+    .from('absensi')
+    .select('sesi_id, status, murid_id, sesi:sesi_id(tanggal)')
+    .in('murid_id', allMuridIds)
+
+  const absenList = ((absenAll ?? []) as any[])
+    .map((a) => ({ sesi_id: a.sesi_id, status: a.status as string, tanggal: a.sesi?.tanggal ?? '' }))
+    .filter((a) => a.tanggal)
+    .sort((a, b) => a.tanggal.localeCompare(b.tanggal))
+
+  // Pisahkan: absensi yang sudah masuk tagihan lunas vs yang belum
+  const absenPeriodeIni = absenList.filter((a) => !sudahDibayarIds.has(a.sesi_id))
+
+  const sesiHadir = absenPeriodeIni.filter((a) => a.status === 'hadir').map((a) => a.sesi_id)
+  const jumlahSakit = absenPeriodeIni.filter((a) => a.status === 'sakit').length
+  const jumlahHadir = sesiHadir.length
+
+  // Tanggal mulai periode: cari dari beberapa sumber, prioritas dari atas ke bawah.
+  let tanggalMulai: string | null = null
+
+  // 1. paid_at tagihan lunas terakhir (paling akurat — kapan bayar = kapan periode baru mulai)
+  if (tagihanLunas.length > 0) {
+    const lastLunas = tagihanLunas.find((t) => t.status === 'lunas')
+    if (lastLunas?.paid_at) {
+      tanggalMulai = lastLunas.paid_at.slice(0, 10)
+    } else if (lastLunas?.tanggal_mulai) {
+      tanggalMulai = lastLunas.tanggal_mulai
+    }
+  }
+
+  // 2. Tanggal absensi pertama di periode ini (belum masuk tagihan)
+  if (!tanggalMulai && absenPeriodeIni.length > 0) {
+    tanggalMulai = absenPeriodeIni[0].tanggal
+  }
+
+  // 3. Tanggal absensi pertama sepanjang history (ada tagihan tapi absen baru blm ada)
+  if (!tanggalMulai && absenList.length > 0) {
+    tanggalMulai = absenList[0].tanggal
+  }
+
+  // 4. LAST RESORT: murid baru yang belum pernah absen sama sekali →
+  //    pakai created_at dari tabel murid (= tanggal didaftarkan) sebagai awal periode.
+  //    Ini yang bikin badge tetap muncul meski murid belum absen 1x pun.
+  if (!tanggalMulai) {
+    const { data: muridRow } = await supabase
+      .from('murid')
+      .select('created_at')
+      .eq('id', muridId)
+      .maybeSingle()
+    if (muridRow?.created_at) {
+      tanggalMulai = (muridRow.created_at as string).slice(0, 10)
+    }
+  }
+
+  // Jika created_at juga tidak ada (edge case ekstrem), fallback ke hari ini
+  if (!tanggalMulai) {
+    tanggalMulai = today
+  }
+
+  // Hitung expiry: 44 hari + (jumlahSakit × 7)
+  const MASA_BERLAKU = 44
+  const EKSTENSI_SAKIT = 7
+  const tanggalExpiry = addDays(tanggalMulai, MASA_BERLAKU + jumlahSakit * EKSTENSI_SAKIT)
+
+  const sisaHari = diffDays(today, tanggalExpiry)
+  const isExpired = sisaHari < 0
+
+  const isResetKarenaLunas = jumlahHadir >= jumlahTarget && tagihanLunas.length > 0
+
+  return {
+    tanggalMulai,
+    tanggalExpiry,
+    sisaHari,
+    jumlahHadir,
+    jumlahSakit,
+    jumlahTarget,
+    siapTagih: jumlahHadir >= jumlahTarget,
+    isExpired,
+    isResetKarenaLunas,
+    siklusBerikutnya,
+    sesiHadir,
+  }
+}
 
 export interface Pembayaran {
   id: string
