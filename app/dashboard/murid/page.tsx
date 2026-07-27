@@ -10,7 +10,7 @@ const HARI_LIST = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu
 
 export default function MuridPage() {
   const [list, setList] = useState<Murid[]>([])
-  const [periodeMap, setPeriodeMap] = useState<Record<string, PeriodeInfo>>({})  // murid_id → PeriodeInfo
+  const [periodeMap, setPeriodeMap] = useState<Record<string, PeriodeInfo>>({})
   const [loadingPeriode, setLoadingPeriode] = useState(false)
   const [search, setSearch] = useState('')
   const [filterHari, setFilterHari] = useState('')
@@ -32,14 +32,9 @@ export default function MuridPage() {
     pemilik: 'Ilham',
   })
 
-  // Edit paket Adik Kakak = edit GROUP, bukan 1 murid. editingGroupIds terisi
-  // kalau modal lagi dalam mode "edit group" — field nama & kategori per anak
-  // dikelola terpisah lewat groupChildren (form.nama cuma dipakai buat header display).
   const [editingGroupIds, setEditingGroupIds] = useState<string[] | null>(null)
   const [groupChildren, setGroupChildren] = useState<{ id: string; nama: string; kategori: 'normal' | 'abk' }[]>([])
 
-  // Mode TAMBAH Adik Kakak baru (bukan edit) — pakai newGroupChildren terpisah
-  // supaya tidak confuse dengan editingGroupIds (yang punya real murid.id)
   const isAddingAdikKakak = !editingGroupIds && !editingId && form.paket === 'Adik Kakak'
   const [newGroupChildren, setNewGroupChildren] = useState<{ tempId: string; nama: string; kategori: 'normal' | 'abk' }[]>([
     { tempId: '1', nama: '', kategori: 'normal' },
@@ -60,7 +55,6 @@ export default function MuridPage() {
     setNewGroupChildren((prev) => prev.filter((c) => c.tempId !== tempId))
   }
 
-  // Bisa pilih lebih dari 1 jadwal (misal paket 8x/bulan = 2x seminggu)
   const [jadwalPilihan, setJadwalPilihan] = useState<{ hari: string; jam_mulai: string; kolam: string }[]>([])
   const maxJadwal = form.jumlah_sesi === 8 ? 2 : 1
 
@@ -76,9 +70,6 @@ export default function MuridPage() {
     })
   }
 
-  // ── Ganti Jadwal Minggu Ini (kelas pengganti/makeup 1x) ───────────────────
-  // penggantiMurids array (bukan 1 murid) — buat paket Adik Kakak, perubahan
-  // jadwal berlaku sekaligus ke SEMUA anak dalam grup itu.
   const [showPengganti, setShowPengganti] = useState(false)
   const [penggantiMurids, setPenggantiMurids] = useState<Murid[]>([])
   const [penggantiSlotsMurid, setPenggantiSlotsMurid] = useState<MuridJadwal[]>([])
@@ -92,15 +83,9 @@ export default function MuridPage() {
 
   const slotKey = (hari: string, jam_mulai: string, kolam: string | null) => `${hari}|${jam_mulai}|${kolam ?? ''}`
 
-  // Kunci unik 1 entri pengganti berdasarkan kombinasi tanggal+jam+kolam — dipakai
-  // buat dedupe riwayat gabungan & buat nemuin pasangan record pas mau dihapus.
   const penggantiKey = (p: Pick<JadwalPengganti, 'tanggal_asal' | 'tanggal_baru' | 'jam' | 'kolam'>) =>
     `${p.tanggal_asal}|${p.tanggal_baru}|${p.jam}|${p.kolam ?? ''}`
 
-  // Ambil ulang slot jadwal + riwayat pengganti gabungan buat sekumpulan murid
-  // (1 anak kalau solo, 2 anak kalau paket Adik Kakak). Riwayat dari semua anak
-  // digabung & di-dedupe — karena entri pengganti selalu ditambahkan bareng ke
-  // semua anak sekaligus, jadi cukup ditampilkan 1x per kombinasi tanggal/jam.
   const loadPenggantiData = async (members: Murid[]) => {
     const first = members[0]
     const [slots, historiesPerMember] = await Promise.all([
@@ -131,7 +116,6 @@ export default function MuridPage() {
     }
   }
 
-  // Nama hari dari tanggal baru yang dipilih, buat nyaring pilihan jam pengganti
   const hariDariTanggalBaru = pgTanggalBaru
     ? new Date(pgTanggalBaru + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long' })
     : ''
@@ -147,7 +131,6 @@ export default function MuridPage() {
     if (!slotBaru) { showToast('Pilih jam pengganti dulu'); return }
     setPgSaving(true)
     try {
-      // Berlaku buat SEMUA anak di grup ini sekaligus (paket Adik Kakak = 1 aksi utk 2 anak)
       for (const m of penggantiMurids) {
         await addJadwalPengganti({
           murid_id: m.id,
@@ -175,8 +158,6 @@ export default function MuridPage() {
     if (!confirm(confirmMsg)) return
     try {
       const targetKey = penggantiKey(p)
-      // Cari & hapus entri yang match di SEMUA anak grup ini (bukan cuma 1 record) —
-      // karena setiap anak punya row jadwal_pengganti sendiri-sendiri di database.
       const historiesPerMember = await Promise.all(penggantiMurids.map((m) => getJadwalPenggantiByMurid(m.id)))
       const idsToDelete = historiesPerMember.flat().filter((x) => penggantiKey(x) === targetKey).map((x) => x.id)
       await Promise.all(idsToDelete.map((id) => deleteJadwalPengganti(id)))
@@ -190,8 +171,6 @@ export default function MuridPage() {
   const updateForm = (updates: Partial<typeof form>) => {
     setForm(prev => {
       const next = { ...prev, ...updates }
-      // Mode edit group: harga = total keluarga yang dikelola manual, jangan ditimpa
-      // otomatis pakai rumus harga 1 anak.
       if (!editingGroupIds) {
         next.harga = hitungHarga(hargaSetting, next.paket, next.kategori, next.jumlah_sesi)
       }
@@ -214,8 +193,6 @@ export default function MuridPage() {
     finally { setLoading(false) }
   }
 
-  // Load masa berlaku semua murid paralel di background — tidak block render utama.
-  // Untuk Adik Kakak: 1x query per kelompok, hasilnya di-share ke semua anggota.
   const loadPeriodeAll = async (murid: Murid[]) => {
     setLoadingPeriode(true)
     try {
@@ -235,7 +212,7 @@ export default function MuridPage() {
           t.rep.id,
           t.rep.paket,
           t.rep.jumlah_sesi ?? undefined,
-          t.ids.filter((id) => id !== t.rep.id)  // extra ids = anggota lain di group
+          t.ids.filter((id) => id !== t.rep.id)
         ))
       )
       const map: Record<string, PeriodeInfo> = {}
@@ -263,9 +240,6 @@ export default function MuridPage() {
     (!filterHari || hariMurid(m).includes(filterHari))
   )
 
-  // Gabungkan murid Adik Kakak jadi 1 "kartu keluarga" berdasarkan kelompok_adik_kakak
-  // (= id registration asalnya). Ini murni tampilan — data Student di database TETAP
-  // terpisah per anak (absensi, edit, hapus, semua tetap per anak seperti biasa).
   type MuridGroup = { key: string; members: Murid[] }
   const groupedFiltered = useMemo<MuridGroup[]>(() => {
     const byGroup: Record<string, Murid[]> = {}
@@ -301,6 +275,12 @@ export default function MuridPage() {
     ])
   }
 
+  // ── FIX: normalize kategori dari DB ke lowercase sebelum set ke form ──────
+  const normalizeKategori = (k: string | null | undefined): 'normal' | 'abk' => {
+    if (!k) return 'normal'
+    return k.toLowerCase() === 'abk' ? 'abk' : 'normal'
+  }
+
   const openEdit = async (m: Murid) => {
     setEditingId(m.id)
     setEditingGroupIds(null)
@@ -308,14 +288,14 @@ export default function MuridPage() {
     setPakaiCustomPemilik(!PEMILIK_TETAP.includes(pemilikMurid))
     setForm({
       nama: m.nama, paket: m.paket, wa_ortu: m.wa_ortu ?? '',
-      kategori: m.kategori, jumlah_sesi: (m.jumlah_sesi as 4|8) ?? 4,
+      kategori: normalizeKategori(m.kategori), // ← FIX
+      jumlah_sesi: (m.jumlah_sesi as 4|8) ?? 4,
       jadwal_hari: m.jadwal_hari ?? '', jadwal_jam: m.jadwal_jam ?? '',
       jadwal_kolam: m.jadwal_kolam ?? KOLAM_PRESETS[0],
       harga: m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4),
       pemilik: pemilikMurid,
     })
     setShowAdd(true)
-    // Ambil jadwal detail (multi-slot) punya murid ini dari murid_jadwal
     try {
       const slots = await getMuridJadwalByMurid(m.id)
       setJadwalPilihan(slots.map((s) => ({ hari: s.hari, jam_mulai: s.jam_mulai, kolam: s.kolam ?? '' })))
@@ -324,12 +304,14 @@ export default function MuridPage() {
     }
   }
 
-  // Edit paket Adik Kakak sebagai 1 GROUP — 1 form buat jadwal/harga/WA/pemilik
-  // yang dibagikan bersama, plus daftar nama+kategori per anak di dalamnya.
   const openEditGroup = async (members: Murid[]) => {
     setEditingId(null)
     setEditingGroupIds(members.map((m) => m.id))
-    setGroupChildren(members.map((m) => ({ id: m.id, nama: m.nama, kategori: m.kategori })))
+    setGroupChildren(members.map((m) => ({
+      id: m.id,
+      nama: m.nama,
+      kategori: normalizeKategori(m.kategori), // ← FIX
+    })))
     const first = members[0]
     const pemilikMurid = first.pemilik || 'Ilham'
     setPakaiCustomPemilik(!PEMILIK_TETAP.includes(pemilikMurid))
@@ -339,7 +321,8 @@ export default function MuridPage() {
     setForm({
       nama: members.map((m) => m.nama).join(' & '),
       paket: first.paket, wa_ortu: first.wa_ortu ?? '',
-      kategori: first.kategori, jumlah_sesi: (first.jumlah_sesi as 4|8) ?? 4,
+      kategori: normalizeKategori(first.kategori), // ← FIX
+      jumlah_sesi: (first.jumlah_sesi as 4|8) ?? 4,
       jadwal_hari: first.jadwal_hari ?? '', jadwal_jam: first.jadwal_jam ?? '',
       jadwal_kolam: first.jadwal_kolam ?? KOLAM_PRESETS[0],
       harga: totalHarga,
@@ -367,7 +350,6 @@ export default function MuridPage() {
     const jadwalJam = jadwalPilihan.map((s) => s.jam_mulai).join(', ')
     const jadwalKolam = jadwalPilihan.map((s) => s.kolam).join(', ')
 
-    // ── Mode edit GROUP (paket Adik Kakak) — 1 form, update semua anak sekaligus ──
     if (editingGroupIds) {
       if (groupChildren.some((c) => !c.nama.trim())) { showToast('Nama semua anak harus diisi'); return }
       setSaving(true)
@@ -394,13 +376,11 @@ export default function MuridPage() {
       return
     }
 
-    // ── Mode TAMBAH Adik Kakak baru ──
     if (isAddingAdikKakak) {
       if (newGroupChildren.some((c) => !c.nama.trim())) { showToast('Nama semua anak harus diisi'); return }
       setSaving(true)
       try {
         const hargaPerAnak = Math.round(form.harga / newGroupChildren.length)
-        // Buat semua anak sekaligus, kumpulkan id mereka
         const muridIds: string[] = []
         for (const child of newGroupChildren) {
           const payload = {
@@ -416,7 +396,6 @@ export default function MuridPage() {
           const newMurid = await addMurid(payload, jadwalPilihan)
           muridIds.push(newMurid.id)
         }
-        // Set kelompok_adik_kakak ke id murid pertama (jadi semua anggota group punya link yg sama)
         const groupKey = muridIds[0]
         await Promise.all(muridIds.map((id) =>
           updateMurid(id, { kelompok_adik_kakak: groupKey })
@@ -429,7 +408,6 @@ export default function MuridPage() {
       return
     }
 
-    // ── Mode solo (murid biasa / tambah baru) ──
     if (!form.nama.trim()) { showToast('Nama harus diisi'); return }
     setSaving(true)
     try {
@@ -454,7 +432,6 @@ export default function MuridPage() {
     catch (e: any) { showToast('Gagal hapus: ' + e?.message, 'error') }
   }
 
-  // Hapus SATU PAKET Adik Kakak sekaligus — kedua anak terhapus bareng, bukan satu-satu.
   const handleDeleteGroup = async (members: Murid[]) => {
     const namaGabungan = members.map((m) => m.nama).join(' & ')
     if (!confirm(`Hapus paket Adik Kakak "${namaGabungan}"? Kedua anak akan terhapus sekaligus.`)) return
@@ -467,7 +444,6 @@ export default function MuridPage() {
     }
   }
 
-  // ── PeriodeBadge — info sisa hari masa berlaku paket ─────────────────────
   const PeriodeBadge = ({ muridId }: { muridId: string }) => {
     const info = periodeMap[muridId]
     if (!info && loadingPeriode) return <div className="text-[10px] text-text-muted animate-pulse mt-0.5">memuat...</div>
@@ -603,9 +579,6 @@ export default function MuridPage() {
             )
           }
 
-          // ── Kartu Keluarga (Adik Kakak) — 1 ENTITAS: semua aksi (WA, Ganti Jadwal,
-          // Edit, Hapus) berlaku buat seluruh paket sekaligus, bukan per anak. Data
-          // Student tetap 2 record di database (buat absensi & identitas per anak).
           const namaGabungan = g.members.map((m) => m.nama).join(' & ')
           const totalHarga = g.members.reduce((sum, m) => sum + (m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4)), 0)
           const first = g.members[0]
@@ -628,10 +601,8 @@ export default function MuridPage() {
                       {first.jadwal_hari} {first.jadwal_jam} · {first.jadwal_kolam}
                     </div>
                   )}
-                  {/* PeriodeBadge 1x untuk whole group — pakai first.id karena semua anggota share info yang sama */}
                   <PeriodeBadge muridId={first.id} />
                 </div>
-                {/* Aksi GROUP — 1 tombol berlaku buat seluruh paket, bukan per anak */}
                 <div className="flex items-center gap-1.5">
                   {first.wa_ortu && (
                     <a href={`https://wa.me/62${first.wa_ortu.replace(/^0/, '')}`} target="_blank"
@@ -658,7 +629,6 @@ export default function MuridPage() {
                 </div>
               </div>
 
-              {/* Daftar anak — display-only, bukan tempat aksi (aksi ada di atas, level group) */}
               <div className="border-t border-border pt-2 flex flex-wrap gap-1.5">
                 {g.members.map((m) => (
                   <span key={m.id} className="inline-flex items-center gap-1 bg-bg-2 text-text text-[11px] font-medium px-2 py-1 rounded-md">
@@ -684,9 +654,7 @@ export default function MuridPage() {
         title={editingGroupIds ? 'Edit Paket Adik Kakak' : isAddingAdikKakak ? 'Tambah Paket Adik Kakak' : editingId ? 'Edit Murid' : 'Tambah Murid Baru'}>
         <div className="flex flex-col gap-3">
 
-          {/* ── Section nama: berbeda tergantung mode ── */}
           {editingGroupIds ? (
-            // Edit group existing
             <div className="bg-blue-light/40 border border-blue/10 rounded-lg p-3">
               <div className="text-[12px] font-semibold text-blue mb-2">Nama & kategori tiap anak</div>
               <div className="flex flex-col gap-2">
@@ -713,7 +681,6 @@ export default function MuridPage() {
               </div>
             </div>
           ) : isAddingAdikKakak ? (
-            // Tambah group baru
             <div className="bg-blue-light/40 border border-blue/10 rounded-lg p-3">
               <div className="text-[12px] font-semibold text-blue mb-2">Nama & kategori tiap anak</div>
               <div className="flex flex-col gap-2">
@@ -752,7 +719,6 @@ export default function MuridPage() {
               </div>
             </div>
           ) : (
-            // Solo murid biasa
             <div>
               <label className="text-[12px] text-text-muted block mb-1">Nama murid</label>
               <input type="text" placeholder="Nama lengkap" value={form.nama}
