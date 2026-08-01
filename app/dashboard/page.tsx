@@ -230,27 +230,49 @@ export default function HariIniPage() {
             {selectedDate === today ? 'Hari ini' : 'Tanggal dipilih'}
           </div>
 
-          {/* Wrapper posisi relative supaya input bisa di-overlay persis di atas teks tanggal */}
-          <div className="relative inline-block">
-            {/* Teks tanggal yang terlihat — font dikecilkan jadi 1 baris di HP */}
-            <div className="text-[15px] font-semibold flex items-center gap-1.5 pointer-events-none select-none">
-              {fmtTgl(selectedDate)}
-              <i className="ti ti-chevron-down text-[13px]" />
-            </div>
-            {/*
-              Input date invisible tapi full-cover di atas teks tanggal.
-              opacity-0 + w-full h-full + cursor-pointer = tap di area ini
-              langsung buka native date picker di iOS Safari & Android Chrome.
-              Tidak pakai sr-only / pointer-events-none supaya tetap tappable.
-            */}
-            <input
-              ref={dateInputRef}
-              type="date"
-              value={selectedDate}
-              onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" style={{ fontSize: "16px" }}
-            />
-          </div>
+          {/*
+            Trick anti-zoom iOS:
+            - input type="date" disembunyikan di luar layar (bukan opacity-0)
+            - tombol visible di-tap → showPicker() dipanggil secara programatik
+            - Dengan cara ini iOS Safari TIDAK auto-zoom karena input tidak pernah
+              masuk viewport / tidak pernah mendapat focus secara visual
+          */}
+          <button
+            onClick={() => {
+              const el = dateInputRef.current
+              if (!el) return
+              try {
+                if (typeof (el as any).showPicker === 'function') {
+                  (el as any).showPicker()
+                } else {
+                  el.focus()
+                  el.click()
+                }
+              } catch { el.click() }
+            }}
+            className="text-[15px] font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all"
+          >
+            {fmtTgl(selectedDate)}
+            <i className="ti ti-chevron-down text-[13px]" />
+          </button>
+          {/* Input di luar viewport — tidak trigger zoom karena tidak visible di layar */}
+          <input
+            ref={dateInputRef}
+            type="date"
+            value={selectedDate}
+            onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+            style={{
+              position: 'fixed',
+              top: '-200px',
+              left: '-200px',
+              width: '1px',
+              height: '1px',
+              fontSize: '16px',
+              opacity: 0,
+              pointerEvents: 'none',
+            }}
+            tabIndex={-1}
+          />
 
           <div className="text-[13px] opacity-80 mt-1 flex items-center gap-2">
             {sesiList.length} sesi · {muridList.length} murid aktif
