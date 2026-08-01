@@ -223,49 +223,41 @@ export default function HariIniPage() {
 
   return (
     <div className="max-w-[720px] mx-auto">
-      {/* Header tanggal — bisa diklik buat pilih tanggal lain */}
-      <div className="bg-[#185FA5] text-white rounded-lg p-4 mb-4 flex items-center justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="text-[11px] opacity-80 mb-0.5">
+      {/* Header tanggal */}
+      <div className="bg-[#185FA5] text-white rounded-lg p-4 mb-4 flex items-start justify-between">
+        <div className="relative">
+          <div className="text-[13px] opacity-80 mb-0.5">
             {selectedDate === today ? 'Hari ini' : 'Tanggal dipilih'}
           </div>
-          {/*
-            Trick mobile: label membungkus input date yang transparan.
-            Di iOS Safari & Android Chrome, tap label = tap input = native date picker muncul.
-            Di desktop tetap pakai showPicker() via onClick di label.
-          */}
-          <label
-            className="text-[13px] sm:text-[15px] font-semibold flex items-center gap-1 cursor-pointer hover:opacity-80 transition-all leading-tight w-fit"
-            onClick={(e) => {
-              const el = dateInputRef.current
-              if (!el) return
-              // Desktop: coba showPicker() dulu
-              try {
-                if (typeof (el as any).showPicker === 'function') {
-                  e.preventDefault()
-                  ;(el as any).showPicker()
-                }
-              } catch { /* fallback ke native label click */ }
-            }}
-          >
-            {fmtTgl(selectedDate)}
-            <i className="ti ti-chevron-down text-[11px] opacity-80" />
-            {/* Input opacity-0 tapi tetap bisa diklik via label — works di semua device */}
+
+          {/* Wrapper posisi relative supaya input bisa di-overlay persis di atas teks tanggal */}
+          <div className="relative inline-block">
+            {/* Teks tanggal yang terlihat — font dikecilkan jadi 1 baris di HP */}
+            <div className="text-[15px] font-semibold flex items-center gap-1.5 pointer-events-none select-none">
+              {fmtTgl(selectedDate)}
+              <i className="ti ti-chevron-down text-[13px]" />
+            </div>
+            {/*
+              Input date invisible tapi full-cover di atas teks tanggal.
+              opacity-0 + w-full h-full + cursor-pointer = tap di area ini
+              langsung buka native date picker di iOS Safari & Android Chrome.
+              Tidak pakai sr-only / pointer-events-none supaya tetap tappable.
+            */}
             <input
               ref={dateInputRef}
               type="date"
               value={selectedDate}
               onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
-              className="sr-only"
-              tabIndex={-1}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
             />
-          </label>
-          <div className="text-[11px] opacity-80 mt-0.5 flex items-center gap-2 flex-wrap">
+          </div>
+
+          <div className="text-[13px] opacity-80 mt-1 flex items-center gap-2">
             {sesiList.length} sesi · {muridList.length} murid aktif
             {selectedDate !== today && (
               <button
                 onClick={() => setSelectedDate(today)}
-                className="underline hover:opacity-80"
+                className="underline hover:opacity-80 relative z-20"
               >
                 Kembali ke hari ini
               </button>
@@ -274,9 +266,9 @@ export default function HariIniPage() {
         </div>
         <button
           onClick={() => setShowTambah(true)}
-          className="flex items-center gap-1 bg-white/20 hover:bg-white/30 text-white text-[12px] sm:text-[13px] px-2.5 py-2 rounded-md font-medium transition-all flex-shrink-0 whitespace-nowrap"
+          className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-[13px] px-3 py-2 rounded-md font-medium transition-all flex-shrink-0"
         >
-          <i className="ti ti-plus text-sm" />Tambah Sesi
+          <i className="ti ti-plus text-base" />Tambah Sesi
         </button>
       </div>
 
