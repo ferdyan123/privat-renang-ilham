@@ -38,9 +38,6 @@ export default function HariIniPage() {
       const [sesiReal, murid, muridJadwal, pengganti] = await Promise.all([getSesiByTanggal(selectedDate), getMurid(), getAllMuridJadwal(), getAllJadwalPengganti()])
       let sesi = [...sesiReal]
 
-      // Kalau ada pola jadwal mingguan (dari sesi yang pernah dibuat sebelumnya) yang
-      // cocok sama hari ini tapi belum ada sesi ASLI di tanggal spesifik ini, tampilkan
-      // sebagai "sesi virtual" — nanti baru dibikin beneran pas absensinya disimpan.
       try {
         const slots = await getSlotDariJadwal()
         const hariIni = HARI_ID[new Date(selectedDate + 'T00:00:00').getDay()]
@@ -87,12 +84,8 @@ export default function HariIniPage() {
   }, [selectedDate])
 
   useEffect(() => {
-    // Cek siap tagih saat halaman dibuka (nggak perlu diulang tiap ganti tanggal)
     getMuridSiapTagih().then(setSiapTagihList).catch(() => {})
   }, [])
-
-  // Status per-murid individual digantikan setEntitasStatus (lihat bawah) —
-  // paket Adik Kakak sekarang selalu di-set bareng lewat 1 kontrol UI.
 
   const saveAbsen = async (sesiId: string) => {
     setSavingSesi(sesiId)
@@ -101,8 +94,6 @@ export default function HariIniPage() {
       if (!sesi) return
       const relevantMurid = muridUntukSesi(sesi)
 
-      // Kalau ini sesi virtual (belum pernah dibuat beneran di tanggal ini),
-      // bikin dulu sesi aslinya sebelum nyimpen absensi.
       let realSesiId = sesiId
       if (sesiId.startsWith('virtual::')) {
         const newSesi = await addSesi({
@@ -123,7 +114,6 @@ export default function HariIniPage() {
       await upsertAbsensiBatch(records)
       showToast('Absensi disimpan ✓', 'success')
       load()
-      // Cek otomatis murid yang sudah siap tagih
       getMuridSiapTagih().then((list) => {
         setSiapTagihList(list)
         if (list.length > 0) {
@@ -156,8 +146,6 @@ export default function HariIniPage() {
     finally { setSaving(false) }
   }
 
-  // Konfigurasi 4 tombol status — H / S / I / A
-  // 'sakit' menambah +7 hari masa berlaku paket (lihat getPeriodeBerjalan di supabase.ts)
   const STATUS_BTNS: { key: Absensi['status']; label: string; icon: string }[] = [
     { key: 'hadir', label: 'Hadir',  icon: 'ti-check' },
     { key: 'sakit', label: 'Sakit',  icon: 'ti-heart-broken' },
@@ -173,15 +161,10 @@ export default function HariIniPage() {
     return isActive ? 'bg-red text-white border-red' : 'border-border text-text-muted hover:border-red/40'
   }
 
-  // Cuma murid yang punya SALAH SATU jadwal (hari+jam+kolam) cocok sama sesi ini.
-  // Murid dengan 2 jadwal (misal paket 8x/bulan) otomatis nongol di 2 sesi berbeda.
-  // Ditambah: kalau ada jadwal pengganti (kelas makeup 1x), nama dia dipindah
-  // dari sesi asal ke sesi baru KHUSUS di tanggal itu — minggu depan balik normal.
   const muridUntukSesi = (s: Sesi) => {
     const hari = HARI_ID[new Date(s.tanggal + 'T00:00:00').getDay()]
     const jamMulai = `${s.jam}:${s.menit}`
 
-    // Murid yang lagi "cuti" dari sesi ini di tanggal ini (udah pindah ke tanggal lain)
     const idsPindahKeluar = new Set(
       penggantiList.filter((p) => p.tanggal_asal === s.tanggal).map((p) => p.murid_id)
     )
@@ -193,7 +176,6 @@ export default function HariIniPage() {
         .filter((id) => !idsPindahKeluar.has(id))
     )
 
-    // Murid yang pindah MASUK ke sesi ini (makeup di tanggal ini)
     penggantiList
       .filter((p) => p.tanggal_baru === s.tanggal && p.jam === jamMulai && (p.kolam ?? '') === s.kolam)
       .forEach((p) => muridIds.add(p.murid_id))
@@ -201,10 +183,6 @@ export default function HariIniPage() {
     return muridList.filter((m) => muridIds.has(m.id))
   }
 
-  // ── Grouping paket Adik Kakak di absensi ──────────────────────────────────
-  // Paket Adik Kakak = 1 ENTITAS absensi, bukan 2 murid terpisah. Semua murid
-  // dengan kelompok_adik_kakak yang sama (dan sama-sama masuk sesi ini)
-  // digabung jadi 1 baris dengan 1 set tombol Hadir/Izin/Alpha.
   type EntitasAbsensi = { key: string; members: Murid[] }
 
   const entitasUntukSesi = (s: Sesi): EntitasAbsensi[] => {
@@ -223,9 +201,6 @@ export default function HariIniPage() {
     return entitas
   }
 
-  // Status gabungan 1 entitas: kalau SALAH SATU anak hadir → dianggap Hadir
-  // Prioritas: hadir > sakit > izin > alpha
-  // Sakit tetap dianggap "tidak hadir" untuk keperluan absensi tapi +7 hari masa berlaku
   const groupStatus = (sesiId: string, members: Murid[]): Absensi['status'] | undefined => {
     const statuses = members.map((m) => absenMap[sesiId]?.[m.id])
     if (statuses.some((st) => st === 'hadir')) return 'hadir'
@@ -235,8 +210,6 @@ export default function HariIniPage() {
     return undefined
   }
 
-  // Set status ke SEMUA anggota entitas sekaligus (1 klik = kedua anak ke-set,
-  // gak mungkin beda status lagi karena cuma ada 1 kontrol di UI)
   const setEntitasStatus = (sesiId: string, members: Murid[], status: Absensi['status']) => {
     setAbsenMap((prev) => {
       const sesiMap = { ...prev[sesiId] }
@@ -251,35 +224,49 @@ export default function HariIniPage() {
   return (
     <div className="max-w-[720px] mx-auto">
       {/* Header tanggal — bisa diklik buat pilih tanggal lain */}
-      <div className="bg-[#185FA5] text-white rounded-lg p-4 mb-4 flex items-start justify-between">
-        <div className="relative">
-          <div className="text-[13px] opacity-80 mb-0.5">
+      <div className="bg-[#185FA5] text-white rounded-lg p-4 mb-4 flex items-center justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] opacity-80 mb-0.5">
             {selectedDate === today ? 'Hari ini' : 'Tanggal dipilih'}
           </div>
-          <button
-            onClick={() => {
+          {/*
+            Trick mobile: label membungkus input date yang transparan.
+            Di iOS Safari & Android Chrome, tap label = tap input = native date picker muncul.
+            Di desktop tetap pakai showPicker() via onClick di label.
+          */}
+          <label
+            className="text-[13px] sm:text-[15px] font-semibold flex items-center gap-1 cursor-pointer hover:opacity-80 transition-all leading-tight w-fit"
+            onClick={(e) => {
               const el = dateInputRef.current
               if (!el) return
-              if (typeof (el as any).showPicker === 'function') (el as any).showPicker()
-              else el.click()
+              // Desktop: coba showPicker() dulu
+              try {
+                if (typeof (el as any).showPicker === 'function') {
+                  e.preventDefault()
+                  ;(el as any).showPicker()
+                }
+              } catch { /* fallback ke native label click */ }
             }}
-            className="text-[17px] font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all"
           >
             {fmtTgl(selectedDate)}
-            <i className="ti ti-chevron-down text-[15px]" />
-          </button>
-          <input
-            ref={dateInputRef}
-            type="date"
-            value={selectedDate}
-            onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
-            className="absolute inset-0 w-full opacity-0 pointer-events-none"
-            tabIndex={-1}
-          />
-          <div className="text-[13px] opacity-80 mt-1 flex items-center gap-2">
+            <i className="ti ti-chevron-down text-[11px] opacity-80" />
+            {/* Input opacity-0 tapi tetap bisa diklik via label — works di semua device */}
+            <input
+              ref={dateInputRef}
+              type="date"
+              value={selectedDate}
+              onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+              className="sr-only"
+              tabIndex={-1}
+            />
+          </label>
+          <div className="text-[11px] opacity-80 mt-0.5 flex items-center gap-2 flex-wrap">
             {sesiList.length} sesi · {muridList.length} murid aktif
             {selectedDate !== today && (
-              <button onClick={() => setSelectedDate(today)} className="underline hover:opacity-80">
+              <button
+                onClick={() => setSelectedDate(today)}
+                className="underline hover:opacity-80"
+              >
                 Kembali ke hari ini
               </button>
             )}
@@ -287,9 +274,9 @@ export default function HariIniPage() {
         </div>
         <button
           onClick={() => setShowTambah(true)}
-          className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-[13px] px-3 py-2 rounded-md font-medium transition-all flex-shrink-0"
+          className="flex items-center gap-1 bg-white/20 hover:bg-white/30 text-white text-[12px] sm:text-[13px] px-2.5 py-2 rounded-md font-medium transition-all flex-shrink-0 whitespace-nowrap"
         >
-          <i className="ti ti-plus text-base" />Tambah Sesi
+          <i className="ti ti-plus text-sm" />Tambah Sesi
         </button>
       </div>
 
@@ -363,7 +350,6 @@ export default function HariIniPage() {
               </div>
             </div>
 
-            {/* List entitas (murid solo ATAU paket Adik Kakak digabung) dengan 3 tombol status */}
             <div className="p-3 flex flex-col gap-2">
               {entitas.length === 0 && (
                 <div className="text-center py-3 text-text-muted text-[12px]">Belum ada murid dengan jadwal tetap di sesi ini</div>
@@ -384,7 +370,6 @@ export default function HariIniPage() {
                         )}
                       </div>
                     </div>
-                    {/* 3 tombol status — H / I / A, berlaku buat semua anggota entitas sekaligus */}
                     <div className="flex gap-1 flex-shrink-0">
                       {STATUS_BTNS.map((btn) => (
                         <button
