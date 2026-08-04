@@ -56,7 +56,7 @@ export default function MuridPage() {
   }
 
   const [jadwalPilihan, setJadwalPilihan] = useState<{ hari: string; jam_mulai: string; kolam: string }[]>([])
-  const maxJadwal = form.jumlah_sesi === 8 ? 2 : 1
+  const maxJadwal = 1
 
   const toggleJadwal = (s: JadwalSlot) => {
     setJadwalPilihan((prev) => {

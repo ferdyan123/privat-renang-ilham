@@ -736,7 +736,7 @@ export const getMuridSiapTagih = async (): Promise<{
   const muridAll = await getMurid()
   const results = []
   for (const m of muridAll) {
-    const info = await getSiklusBerjalan(m.id, m.paket)
+    const info = await getSiklusBerjalan(m.id, m.paket, m.jumlah_sesi ?? undefined)
     if (info.siapTagih) {
       results.push({
         murid: m,
