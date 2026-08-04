@@ -853,9 +853,7 @@ export default function MuridPage() {
 
             <div className="text-[11px] mb-2">
               <span className={jadwalPilihan.length === maxJadwal ? 'text-blue font-semibold' : 'text-text-muted'}>
-                {maxJadwal === 2
-                  ? `Paket 8x/bulan = 2x seminggu, pilih tepat 2 jadwal (${jadwalPilihan.length}/2 dipilih)`
-                  : `Pilih 1 jadwal (${jadwalPilihan.length}/1 dipilih)`}
+                {`Pilih 1 jadwal (${jadwalPilihan.length}/1 dipilih)`}
               </span>
             </div>
 
