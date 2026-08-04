@@ -11,7 +11,7 @@ import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
 
 const HARI_ORDER = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu']
-const JAMS = ['05','06','07','08','09','10','11','12','13','14','15','16','17']
+const JAMS = ['05','06','07','08','09','10','11','12','13','14','15','16','17','18','19','20','21','22']
 const MENIT_LIST = ['00','15','30','45']
 const HARI_BTN = ['Min','Sen','Sel','Rab','Kam','Jum','Sab']
 
