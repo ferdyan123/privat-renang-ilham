@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -6,9 +6,9 @@ export const metadata: Metadata = {
   description: 'Aplikasi manajemen les renang',
 }
 
-// Viewport export Next.js 14+ — ini yang generate <meta name="viewport"> yang benar
-// user-scalable=no + maximum-scale=1 → cegah auto-zoom iOS Safari
-export const viewport = {
+// Viewport export Next.js 14+ — generate <meta name="viewport"> yang benar
+// maximumScale:1 + userScalable:false → cegah auto-zoom iOS Safari
+export const viewport: Viewport = {
   themeColor: '#185FA5',
   width: 'device-width',
   initialScale: 1,
