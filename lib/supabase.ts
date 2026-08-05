@@ -257,6 +257,20 @@ export const getSesi = async (limit = 90): Promise<Sesi[]> => {
   return data
 }
 
+// Ambil sesi berdasarkan daftar ID — dipakai halaman Kirim biar tidak kena limit getSesi.
+// Hasilnya diurutkan tanggal ASC sehingga nomor urut absensi (1, 2, 3, …) sudah benar.
+export const getSesiByIds = async (ids: string[]): Promise<Sesi[]> => {
+  if (ids.length === 0) return []
+  const { data, error } = await supabase
+    .from('sesi')
+    .select('*')
+    .in('id', ids)
+    .order('tanggal', { ascending: true })
+    .order('jam', { ascending: true })
+  if (error) throw error
+  return data ?? []
+}
+
 export const getSesiByTanggal = async (tanggal: string): Promise<Sesi[]> => {
   const { data, error } = await supabase
     .from('sesi')

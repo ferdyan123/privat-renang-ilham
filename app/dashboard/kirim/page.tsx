@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, Suspense, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { getMurid, getSesi, createTagihan, getSiklusBerjalan, Murid, Sesi } from '@/lib/supabase'
+import { getMurid, getSesiByIds, createTagihan, getSiklusBerjalan, Murid, Sesi } from '@/lib/supabase'
 import { fmtShort, fmtRupiah, getRekeningByPemilik } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Avatar from '@/components/ui/Avatar'
@@ -137,11 +137,11 @@ function KirimPageContent() {
       // Cari representative murid buat siklus (pakai anggota pertama)
       const representative = list.find((m) => (m.kelompok_adik_kakak || m.id) === key)
       if (!representative) return
-      const info = await getSiklusBerjalan(representative.id, representative.paket)
-      const sesiAll = await getSesi(500)
-      const sesiDetail = sesiAll
-        .filter((s) => info.sesiHadir.includes(s.id))
-        .sort((a, b) => a.tanggal.localeCompare(b.tanggal))
+      // Kirim jumlah_sesi dari DB sebagai override agar paket 8x tidak salah hitung
+      const jumlahSesiMurid = representative.jumlah_sesi ?? undefined
+      const info = await getSiklusBerjalan(representative.id, representative.paket, jumlahSesiMurid)
+      // Fetch sesi hanya berdasarkan ID yang relevan — tidak pakai limit, urut ASC by tanggal
+      const sesiDetail = await getSesiByIds(info.sesiHadir)
       setSiklus({ ...info, sesiDetail })
     } catch (e: any) {
       showToast('Gagal cek siklus: ' + e?.message, 'error')
