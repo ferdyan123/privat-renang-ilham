@@ -231,48 +231,41 @@ export default function HariIniPage() {
           </div>
 
           {/*
-            Trick anti-zoom iOS:
-            - input type="date" disembunyikan di luar layar (bukan opacity-0)
-            - tombol visible di-tap → showPicker() dipanggil secara programatik
-            - Dengan cara ini iOS Safari TIDAK auto-zoom karena input tidak pernah
-              masuk viewport / tidak pernah mendapat focus secara visual
+            Strategi date picker kompatibel iOS Safari:
+            - Tombol teks menampilkan tanggal yang dipilih
+            - Di belakangnya ada input[type=date] yang di-overlay persis di atas tombol
+            - Input punya opacity:0 tapi BUKAN pointer-events:none → iOS bisa tap
+            - fontSize: 16px wajib → cegah auto-zoom iOS (iOS zoom kalau < 16px)
+            - Cara ini lebih andal daripada showPicker() yang kadang diblok iOS
           */}
-          <button
-            onClick={() => {
-              const el = dateInputRef.current
-              if (!el) return
-              try {
-                if (typeof (el as any).showPicker === 'function') {
-                  (el as any).showPicker()
-                } else {
-                  el.focus()
-                  el.click()
-                }
-              } catch { el.click() }
-            }}
-            className="text-[15px] font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all"
-          >
-            {fmtTgl(selectedDate)}
-            <i className="ti ti-chevron-down text-[13px]" />
-          </button>
-          {/* Input di luar viewport — tidak trigger zoom karena tidak visible di layar */}
-          <input
-            ref={dateInputRef}
-            type="date"
-            value={selectedDate}
-            onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
-            style={{
-              position: 'fixed',
-              top: '-200px',
-              left: '-200px',
-              width: '1px',
-              height: '1px',
-              fontSize: '16px',
-              opacity: 0,
-              pointerEvents: 'none',
-            }}
-            tabIndex={-1}
-          />
+          <div className="relative inline-flex items-center">
+            <button
+              className="text-[15px] font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all"
+              tabIndex={-1}
+              aria-hidden="true"
+            >
+              {fmtTgl(selectedDate)}
+              <i className="ti ti-chevron-down text-[13px]" />
+            </button>
+            {/* Input overlay — transparan tapi tetap bisa di-tap di iOS */}
+            <input
+              ref={dateInputRef}
+              type="date"
+              value={selectedDate}
+              onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+              aria-label="Pilih tanggal"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                opacity: 0,
+                cursor: 'pointer',
+                fontSize: '16px',   // wajib >= 16px biar iOS tidak zoom
+                zIndex: 10,
+              }}
+            />
+          </div>
 
           <div className="text-[13px] opacity-80 mt-1 flex items-center gap-2">
             {sesiList.length} sesi · {muridList.length} murid aktif
@@ -421,11 +414,13 @@ export default function HariIniPage() {
           <div>
             <label className="text-[12px] text-text-muted block mb-1">Jam mulai</label>
             <div className="flex gap-2">
-              <select className="flex-1 border border-border rounded-md px-3 py-2 text-sm bg-bg text-text"
+              <select className="flex-1 border border-border rounded-md px-3 py-2 bg-bg text-text"
+                style={{ fontSize: '16px' }}
                 value={jam} onChange={(e) => setJam(e.target.value)}>
                 {JAMS.map((j) => <option key={j} value={j}>{j}:xx</option>)}
               </select>
-              <select className="flex-1 border border-border rounded-md px-3 py-2 text-sm bg-bg text-text"
+              <select className="flex-1 border border-border rounded-md px-3 py-2 bg-bg text-text"
+                style={{ fontSize: '16px' }}
                 value={menit} onChange={(e) => setMenit(e.target.value)}>
                 {MENIT.map((m) => <option key={m} value={m}>:{m}</option>)}
               </select>
@@ -460,7 +455,8 @@ export default function HariIniPage() {
               <input type="text" placeholder="Nama kolam (contoh: Kolam Olimpik)"
                 value={kolam}
                 onChange={(e) => setKolam(e.target.value)}
-                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
+                className="w-full border border-border rounded-md px-3 py-2 bg-bg text-text"
+                style={{ fontSize: '16px' }} />
             )}
           </div>
           <button onClick={tambahSesi} disabled={saving}
