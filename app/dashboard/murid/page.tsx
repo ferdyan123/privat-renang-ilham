@@ -36,6 +36,10 @@ export default function MuridPage() {
   const [groupChildren, setGroupChildren] = useState<{ id: string; nama: string; kategori: 'normal' | 'abk' }[]>([])
 
   const isAddingAdikKakak = !editingGroupIds && !editingId && form.paket === 'Adik Kakak'
+  // Edit murid biasa → pilih paket Adik Kakak: tampilkan form children seperti Tambah
+  const isConvertingToAdikKakak = !editingGroupIds && !!editingId && form.paket === 'Adik Kakak'
+  // Semua kondisi yang perlu tampilkan children list
+  const isAdikKakakMode = isAddingAdikKakak || isConvertingToAdikKakak
   const [newGroupChildren, setNewGroupChildren] = useState<{ tempId: string; nama: string; kategori: 'normal' | 'abk' }[]>([
     { tempId: '1', nama: '', kategori: 'normal' },
     { tempId: '2', nama: '', kategori: 'normal' },
@@ -172,10 +176,29 @@ export default function MuridPage() {
     setForm(prev => {
       const next = { ...prev, ...updates }
       if (!editingGroupIds) {
-        next.harga = hitungHarga(hargaSetting, next.paket, next.kategori, next.jumlah_sesi)
+        const targetPaket = updates.paket ?? prev.paket
+        if (targetPaket === 'Adik Kakak') {
+          // Harga total keluarga = per-anak × jumlah anak
+          const jumlahAnak = newGroupChildren.length || 2
+          const hargaPerAnak = hitungHarga(hargaSetting, targetPaket, 'normal', next.jumlah_sesi)
+          next.harga = hargaPerAnak * jumlahAnak
+        } else {
+          next.harga = hitungHarga(hargaSetting, next.paket, next.kategori, next.jumlah_sesi)
+        }
       }
       return next
     })
+    // Saat paket berubah kembali dari Adik Kakak ke murid biasa di mode edit:
+    // reset children ke prefill awal (Anak 1 = nama murid yang sedang diedit)
+    if (updates.paket && updates.paket !== 'Adik Kakak') {
+      setForm(prev => {
+        const nama1 = newGroupChildren[0]?.nama || prev.nama
+        const kat1 = newGroupChildren[0]?.kategori || prev.kategori
+        // kembalikan nama dan kategori dari anak 1 ke form
+        return { ...prev, nama: nama1, kategori: kat1, ...updates,
+          harga: hitungHarga(hargaSetting, updates.paket!, kat1, prev.jumlah_sesi) }
+      })
+    }
     if (updates.jumlah_sesi) {
       const maxBaru = updates.jumlah_sesi === 8 ? 2 : 1
       setJadwalPilihan((prev) => prev.slice(0, maxBaru))
@@ -286,15 +309,22 @@ export default function MuridPage() {
     setEditingGroupIds(null)
     const pemilikMurid = m.pemilik || 'Ilham'
     setPakaiCustomPemilik(!PEMILIK_TETAP.includes(pemilikMurid))
+    const kategoriMurid = normalizeKategori(m.kategori)
     setForm({
       nama: m.nama, paket: m.paket, wa_ortu: m.wa_ortu ?? '',
-      kategori: normalizeKategori(m.kategori), // ← FIX
+      kategori: kategoriMurid,
       jumlah_sesi: (m.jumlah_sesi as 4|8) ?? 4,
       jadwal_hari: m.jadwal_hari ?? '', jadwal_jam: m.jadwal_jam ?? '',
       jadwal_kolam: m.jadwal_kolam ?? KOLAM_PRESETS[0],
       harga: m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4),
       pemilik: pemilikMurid,
     })
+    // Prefill children: murid lama jadi Anak 1, Anak 2 kosong
+    // Ini dipakai saat user mengubah paket ke Adik Kakak dari Edit
+    setNewGroupChildren([
+      { tempId: '1', nama: m.nama, kategori: kategoriMurid },
+      { tempId: '2', nama: '', kategori: 'normal' },
+    ])
     setShowAdd(true)
     try {
       const slots = await getMuridJadwalByMurid(m.id)
@@ -376,31 +406,67 @@ export default function MuridPage() {
       return
     }
 
-    if (isAddingAdikKakak) {
+    if (isAdikKakakMode) {
       if (newGroupChildren.some((c) => !c.nama.trim())) { showToast('Nama semua anak harus diisi'); return }
       setSaving(true)
       try {
         const hargaPerAnak = Math.round(form.harga / newGroupChildren.length)
         const muridIds: string[] = []
-        for (const child of newGroupChildren) {
-          const payload = {
-            nama: child.nama.trim(),
+
+        if (isConvertingToAdikKakak && editingId) {
+          // Murid lama (Anak 1) — update in-place
+          const anak1 = newGroupChildren[0]
+          await updateMurid(editingId, {
+            nama: anak1.nama.trim(),
             paket: form.paket,
             wa_ortu: form.wa_ortu,
-            kategori: child.kategori,
+            kategori: anak1.kategori,
             jadwal_hari: jadwalHari, jadwal_jam: jadwalJam, jadwal_kolam: jadwalKolam,
             harga: hargaPerAnak,
             jumlah_sesi: form.jumlah_sesi,
             pemilik: form.pemilik,
+          })
+          await replaceMuridJadwal(editingId, jadwalPilihan)
+          muridIds.push(editingId)
+
+          // Anak 2+ — buat baru
+          for (const child of newGroupChildren.slice(1)) {
+            const payload = {
+              nama: child.nama.trim(),
+              paket: form.paket,
+              wa_ortu: form.wa_ortu,
+              kategori: child.kategori,
+              jadwal_hari: jadwalHari, jadwal_jam: jadwalJam, jadwal_kolam: jadwalKolam,
+              harga: hargaPerAnak,
+              jumlah_sesi: form.jumlah_sesi,
+              pemilik: form.pemilik,
+            }
+            const newMurid = await addMurid(payload, jadwalPilihan)
+            muridIds.push(newMurid.id)
           }
-          const newMurid = await addMurid(payload, jadwalPilihan)
-          muridIds.push(newMurid.id)
+        } else {
+          // Mode tambah baru (isAddingAdikKakak)
+          for (const child of newGroupChildren) {
+            const payload = {
+              nama: child.nama.trim(),
+              paket: form.paket,
+              wa_ortu: form.wa_ortu,
+              kategori: child.kategori,
+              jadwal_hari: jadwalHari, jadwal_jam: jadwalJam, jadwal_kolam: jadwalKolam,
+              harga: hargaPerAnak,
+              jumlah_sesi: form.jumlah_sesi,
+              pemilik: form.pemilik,
+            }
+            const newMurid = await addMurid(payload, jadwalPilihan)
+            muridIds.push(newMurid.id)
+          }
         }
+
         const groupKey = muridIds[0]
         await Promise.all(muridIds.map((id) =>
           updateMurid(id, { kelompok_adik_kakak: groupKey })
         ))
-        showToast(`Paket Adik Kakak ${newGroupChildren.map((c) => c.nama).join(' & ')} ditambahkan ✓`, 'success')
+        showToast(`Paket Adik Kakak ${newGroupChildren.map((c) => c.nama).join(' & ')} ${isConvertingToAdikKakak ? 'diperbarui' : 'ditambahkan'} ✓`, 'success')
         setShowAdd(false); resetForm(); load()
       } catch (e: any) {
         showToast('Gagal: ' + e?.message, 'error'); console.error(e)
@@ -651,7 +717,7 @@ export default function MuridPage() {
       )}
 
       <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }}
-        title={editingGroupIds ? 'Edit Paket Adik Kakak' : isAddingAdikKakak ? 'Tambah Paket Adik Kakak' : editingId ? 'Edit Murid' : 'Tambah Murid Baru'}>
+        title={editingGroupIds ? 'Edit Paket Adik Kakak' : isConvertingToAdikKakak ? 'Edit → Paket Adik Kakak' : isAddingAdikKakak ? 'Tambah Paket Adik Kakak' : editingId ? 'Edit Murid' : 'Tambah Murid Baru'}>
         <div className="flex flex-col gap-3">
 
           {editingGroupIds ? (
@@ -680,7 +746,7 @@ export default function MuridPage() {
                 Jadwal, harga, WA, dan pemilik di bawah berlaku sama buat semua anak di paket ini.
               </div>
             </div>
-          ) : isAddingAdikKakak ? (
+          ) : isAdikKakakMode ? (
             <div className="bg-blue-light/40 border border-blue/10 rounded-lg p-3">
               <div className="text-[12px] font-semibold text-blue mb-2">Nama & kategori tiap anak</div>
               <div className="flex flex-col gap-2">
@@ -767,7 +833,7 @@ export default function MuridPage() {
             </div>
           </div>
 
-          {!editingGroupIds && !isAddingAdikKakak && (
+          {!editingGroupIds && !isAdikKakakMode && (
           <div>
             <label className="text-[12px] text-text-muted block mb-1.5">Kategori murid</label>
             <div className="grid grid-cols-2 gap-2">
@@ -820,12 +886,12 @@ export default function MuridPage() {
           <div className="bg-blue-light border border-blue/20 rounded-md px-3 py-2.5">
             <div className="flex items-center justify-between mb-1.5">
               <div className="text-[11px] text-text-muted">
-                {(editingGroupIds || isAddingAdikKakak)
+                {(editingGroupIds || isAdikKakakMode)
                   ? `Harga total/bulan (${editingGroupIds ? groupChildren.length : newGroupChildren.length} anak)`
                   : 'Harga/bulan'}
               </div>
               <div className="text-[10px] text-blue/60">
-                {editingGroupIds ? `${form.paket} · ${form.jumlah_sesi}x` : `${form.paket} · ${form.jumlah_sesi}x · ${form.kategori === 'abk' ? 'ABK' : 'Normal'}`}
+                {(editingGroupIds || isAdikKakakMode) ? `${form.paket} · ${form.jumlah_sesi}x` : `${form.paket} · ${form.jumlah_sesi}x · ${form.kategori === 'abk' ? 'ABK' : 'Normal'}`}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -840,7 +906,7 @@ export default function MuridPage() {
               />
             </div>
             <div className="text-[10px] text-blue/50 mt-1">
-              {(editingGroupIds || isAddingAdikKakak)
+              {(editingGroupIds || isAdikKakakMode)
                 ? `Harga total keluarga — dibagi rata jadi Rp ${Math.round(form.harga / Math.max(1, editingGroupIds ? groupChildren.length : newGroupChildren.length)).toLocaleString('id-ID')}/anak saat disimpan.`
                 : 'Harga otomatis dari paket. Bisa diubah manual jika ada harga khusus.'}
             </div>
@@ -897,7 +963,7 @@ export default function MuridPage() {
 
           <button onClick={handleSave} disabled={saving}
             className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-sm font-semibold mt-1 hover:bg-[#0C447C] disabled:opacity-50 transition-all">
-            {saving ? 'Menyimpan...' : (editingGroupIds ? 'Simpan Perubahan Paket' : isAddingAdikKakak ? 'Tambah Paket Adik Kakak' : editingId ? 'Simpan Perubahan' : 'Tambah Murid')}
+            {saving ? 'Menyimpan...' : (editingGroupIds ? 'Simpan Perubahan Paket' : isConvertingToAdikKakak ? 'Simpan sebagai Paket Adik Kakak' : isAddingAdikKakak ? 'Tambah Paket Adik Kakak' : editingId ? 'Simpan Perubahan' : 'Tambah Murid')}
           </button>
         </div>
       </Modal>
