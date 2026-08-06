@@ -635,7 +635,7 @@ function DaftarPublikPageContent() {
                 <div className="mt-2.5 pt-2.5 border-t border-[#C8E4F5] flex items-start gap-1.5">
                   <i className="ti ti-info-circle text-[#185FA5] text-[13px] flex-shrink-0 mt-0.5" />
                   <p className="text-[11px] text-[#185FA5]/80 leading-relaxed">
-                    Harga di atas <strong>belum termasuk biaya tiket masuk kolam renang</strong>. Biaya kolam ditanggung masing-masing peserta dan dibayarkan langsung saat sesi berlangsung.
+                    Harga di atas <strong>belum termasuk biaya tiket masuk kolam renang</strong>.
                   </p>
                 </div>
               </div>
