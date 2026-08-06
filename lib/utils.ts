@@ -148,4 +148,5 @@ export const PERATURAN_SESI: string[] = [
   'Jadwal pengganti akan disesuaikan dengan ketersediaan jadwal coach serta kesepakatan dengan orang tua/wali.',
   'Untuk paket kakak beradik, apabila pada jadwal privat hanya satu anak yang hadir sementara anak lainnya tidak hadir, maka keduanya tetap akan dianggap hadir dan absensi pada pertemuan tersebut akan dihitung untuk kedua siswa.',
   'Demi kelancaran proses belajar, mohon memberikan konfirmasi ketidakhadiran atau permohonan reschedule sebelum jadwal privat berlangsung.',
+  'Biaya tiket masuk kolam renang tidak termasuk dalam paket les. Setiap peserta diharapkan membayar tiket masuk kolam secara mandiri pada setiap sesi.',
 ]
