@@ -2,13 +2,7 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { fmtShort, PERATURAN_SESI } from '@/lib/utils'
-
-const REKENING = {
-  nama: 'Muhammad Nurilham Aulia Rahman',
-  bank: 'Sea Bank',
-  nomor: '901452432623',
-}
+import { fmtShort, PERATURAN_SESI, getRekeningByPemilik } from '@/lib/utils'
 
 interface SesiDetail { tanggal: string; jam: string; menit: string; kolam: string }
 interface TagihanData {
@@ -18,7 +12,7 @@ interface TagihanData {
   jumlah_hadir: number
   status: string
   bukti_tf_url: string | null
-  murid: { nama: string; paket: string; wa_ortu: string }
+  murid: { nama: string; paket: string; wa_ortu: string; pemilik: string | null }
   sesi_detail: SesiDetail[]
 }
 
@@ -40,7 +34,7 @@ function KartuContent() {
     try {
       const { data: tagihan, error: e } = await supabase
         .from('tagihan')
-        .select('*, murid:murid_id(nama, paket, wa_ortu)')
+        .select('*, murid:murid_id(nama, paket, wa_ortu, pemilik)')
         .eq('id', tagihanId)
         .single()
       if (e || !tagihan) throw new Error('Tagihan tidak ditemukan')
@@ -112,8 +106,10 @@ function KartuContent() {
 
   const showSuccessToast = () => {} // handled by submitted state
 
+  const rekening = getRekeningByPemilik(data?.murid?.pemilik)
+
   const copyNoRek = () => {
-    navigator.clipboard.writeText(REKENING.nomor)
+    navigator.clipboard.writeText(rekening.nomor)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -336,16 +332,16 @@ function KartuContent() {
             <div className="flex flex-col gap-2 text-[13px]">
               <div className="flex justify-between">
                 <span className="text-gray-400">Nama Rekening</span>
-                <span className="font-semibold text-gray-800 text-right max-w-[200px]">{REKENING.nama}</span>
+                <span className="font-semibold text-gray-800 text-right max-w-[200px]">{rekening.nama}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Bank</span>
-                <span className="font-semibold text-gray-800">{REKENING.bank}</span>
+                <span className="font-semibold text-gray-800">{rekening.bank}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">No. Rekening</span>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono font-bold text-gray-800 text-[14px]">{REKENING.nomor}</span>
+                  <span className="font-mono font-bold text-gray-800 text-[14px]">{rekening.nomor}</span>
                   <button onClick={copyNoRek}
                     className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md transition-all ${copied ? 'bg-green-100 text-green-600' : 'bg-[#E6F4FB] text-[#185FA5] hover:bg-blue-100'}`}>
                     <i className={`ti ${copied ? 'ti-check' : 'ti-copy'} text-xs`} />
