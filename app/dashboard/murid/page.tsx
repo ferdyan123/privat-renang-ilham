@@ -60,7 +60,7 @@ export default function MuridPage() {
   }
 
   const [jadwalPilihan, setJadwalPilihan] = useState<{ hari: string; jam_mulai: string; kolam: string }[]>([])
-  const maxJadwal = 1
+  const maxJadwal = form.jumlah_sesi === 8 ? 2 : 1
 
   const toggleJadwal = (s: JadwalSlot) => {
     setJadwalPilihan((prev) => {
@@ -372,8 +372,10 @@ export default function MuridPage() {
   }
 
   const handleSave = async () => {
+    // ── FIX: validasi jadwal fleksibel untuk paket 8x ──
     if (jadwalPilihan.length === 0) { showToast('Pilih minimal 1 jadwal'); return }
-    if (jadwalPilihan.length !== maxJadwal) { showToast(`Paket ${form.jumlah_sesi}x/bulan wajib pilih ${maxJadwal} jadwal`); return }
+    if (form.jumlah_sesi === 8 && jadwalPilihan.length > 2) { showToast('Maksimal 2 jadwal untuk paket 8x/bulan'); return }
+    if (form.jumlah_sesi === 4 && jadwalPilihan.length > 1) { showToast('Paket 4x/bulan hanya bisa pilih 1 jadwal'); return }
     if (pakaiCustomPemilik && !form.pemilik.trim()) { showToast('Isi dulu nama pemiliknya'); return }
 
     const jadwalHari = jadwalPilihan.map((s) => s.hari).join(', ')
@@ -917,9 +919,12 @@ export default function MuridPage() {
               <i className="ti ti-calendar-time text-sm" />Jadwal Tetap Mingguan
             </div>
 
+            {/* ── FIX: label counter jadwal dinamis sesuai jumlah_sesi ── */}
             <div className="text-[11px] mb-2">
-              <span className={jadwalPilihan.length === maxJadwal ? 'text-blue font-semibold' : 'text-text-muted'}>
-                {`Pilih 1 jadwal (${jadwalPilihan.length}/1 dipilih)`}
+              <span className={jadwalPilihan.length >= 1 ? 'text-blue font-semibold' : 'text-text-muted'}>
+                {form.jumlah_sesi === 8
+                  ? `Paket 8x/bulan: pilih 1 atau 2 jadwal (${jadwalPilihan.length}/${maxJadwal} dipilih)`
+                  : `Pilih 1 jadwal (${jadwalPilihan.length}/1 dipilih)`}
               </span>
             </div>
 
