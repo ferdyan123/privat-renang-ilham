@@ -1,10 +1,35 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { getSlotDariJadwal, setSlotPenuh, setSlotTersedia, setSlotKuota, getPemilikSuggestions, getHargaSetting, updateHargaSetting, SlotInfo } from '@/lib/supabase'
-import { PEMILIK_TETAP, HargaSetting, DEFAULT_HARGA_SETTING, formatRibuan, parseRibuan } from '@/lib/utils'
+import { PEMILIK_TETAP, COACH_LIST, HargaSetting, DEFAULT_HARGA_SETTING, formatRibuan, parseRibuan } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 
+// Grup input harga: 1 kartu per paket biar jelas ini harga buat apa
+const HARGA_GROUP: { judul: string; ket: string; fields: [string, string][] }[] = [
+  { judul: 'Semi Privat', ket: 'maks 4 anak', fields: [['semi_privat_normal', 'Normal'], ['semi_privat_abk', 'ABK']] },
+  { judul: 'Eksklusif', ket: 'sesi 1-on-1', fields: [['eksklusif_normal', 'Normal'], ['eksklusif_abk', 'ABK']] },
+  { judul: 'Adik Kakak', ket: 'harga per anak', fields: [['adik_kakak_normal', 'Normal'], ['adik_kakak_abk', 'ABK']] },
+  { judul: 'Dewasa', ket: 'Eksklusif, satu harga', fields: [['dewasa_eksklusif', 'Eksklusif']] },
+]
+
 export default function SlotPage() {
+  return (
+    <Suspense fallback={null}>
+      <SlotPageContent />
+    </Suspense>
+  )
+}
+
+function SlotPageContent() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  // Tab coach dari URL: ?coach=ilham | riska (default ilham)
+  const coachParam = (searchParams.get('coach') || 'ilham').toLowerCase()
+  const coachAktif = COACH_LIST.find((c) => c.toLowerCase() === coachParam) ?? COACH_LIST[0]
+  const [kolamAktif, setKolamAktif] = useState('')
+  const gantiCoach = (c: string) => router.replace(`/dashboard/slot?coach=${c.toLowerCase()}`, { scroll: false })
+
   const [slots, setSlots] = useState<SlotInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [generatedLink, setGeneratedLink] = useState('')
@@ -34,6 +59,7 @@ export default function SlotPage() {
         eksklusif_abk: formatRibuan(s.eksklusif_abk),
         adik_kakak_normal: formatRibuan(s.adik_kakak_normal),
         adik_kakak_abk: formatRibuan(s.adik_kakak_abk),
+        dewasa_eksklusif: formatRibuan(s.dewasa_eksklusif),
       })
       setHargaBerubah(false)
     } catch { showToast('Gagal load setting harga', 'error') }
@@ -54,6 +80,7 @@ export default function SlotPage() {
         eksklusif_abk: parseRibuan(hargaForm.eksklusif_abk),
         adik_kakak_normal: parseRibuan(hargaForm.adik_kakak_normal),
         adik_kakak_abk: parseRibuan(hargaForm.adik_kakak_abk),
+        dewasa_eksklusif: parseRibuan(hargaForm.dewasa_eksklusif),
       }
       await updateHargaSetting(next)
       setHargaSetting(next)
@@ -76,11 +103,11 @@ export default function SlotPage() {
     loadHarga()
   }, [])
 
-  const slotKey = (slot: SlotInfo) => `${slot.hari}__${slot.jam_mulai}__${slot.kolam}`
+  const slotKey = (slot: SlotInfo) => `${slot.hari}__${slot.jam_mulai}__${slot.kolam}__${slot.coach}`
 
   const updateLokal = (slot: SlotInfo, next: Partial<SlotInfo>) => {
     setSlots(prev => prev.map(s =>
-      s.hari === slot.hari && s.jam_mulai === slot.jam_mulai && s.kolam === slot.kolam
+      s.hari === slot.hari && s.jam_mulai === slot.jam_mulai && s.kolam === slot.kolam && s.coach === slot.coach
         ? { ...s, ...next } : s
     ))
   }
@@ -92,13 +119,13 @@ export default function SlotPage() {
     try {
       if (slot.status === 'tersedia') {
         // Klik jadi Penuh → kuota otomatis 0
-        await setSlotPenuh(slot.hari, slot.jam_mulai, slot.kolam)
+        await setSlotPenuh(slot.hari, slot.jam_mulai, slot.kolam, slot.coach)
         updateLokal(slot, { status: 'penuh', kuota: 0 })
         showToast(`${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Penuh`, 'success')
       } else {
         // Klik jadi Tersedia → kuota default 1 (bisa diubah manual di angka kuota)
         const kuotaBaru = 1
-        await setSlotTersedia(slot.hari, slot.jam_mulai, slot.kolam, kuotaBaru)
+        await setSlotTersedia(slot.hari, slot.jam_mulai, slot.kolam, slot.coach, kuotaBaru)
         updateLokal(slot, { status: 'tersedia', kuota: kuotaBaru })
         showToast(`${slot.kolam} ${slot.hari} ${slot.jam_mulai} → Tersedia`, 'success')
       }
@@ -112,7 +139,7 @@ export default function SlotPage() {
     const final = Math.max(0, kuotaBaru)
     setToggling(key)
     try {
-      await setSlotKuota(slot.hari, slot.jam_mulai, slot.kolam, final)
+      await setSlotKuota(slot.hari, slot.jam_mulai, slot.kolam, slot.coach, final)
       updateLokal(slot, { kuota: final, status: final > 0 ? 'tersedia' : 'penuh' })
       setKuotaInput(prev => ({ ...prev, [key]: String(final) }))
     } catch (e: any) { showToast('Gagal update kuota: ' + e?.message, 'error') }
@@ -137,10 +164,15 @@ export default function SlotPage() {
   }
 
   // Group by kolam
-  const grouped = slots.reduce<Record<string, SlotInfo[]>>((acc, s) => {
+  const slotsCoach = slots.filter(s => s.coach === coachAktif)
+  const grouped = slotsCoach.reduce<Record<string, SlotInfo[]>>((acc, s) => {
     acc[s.kolam] = acc[s.kolam] ? [...acc[s.kolam], s] : [s]
     return acc
   }, {})
+
+  // Kolam terpilih; kalau belum dipilih / tidak ada di coach ini → kolam pertama yang punya data
+  const daftarKolam = Object.keys(grouped)
+  const kolamTampil = daftarKolam.includes(kolamAktif) ? kolamAktif : (daftarKolam[0] ?? '')
 
   const tersediaCount = slots.filter(s => s.status === 'tersedia').length
   const penuhCount = slots.filter(s => s.status === 'penuh').length
@@ -185,26 +217,31 @@ export default function SlotPage() {
           cuma pendaftaran baru yang kena harga terbaru. 8x/bulan otomatis 2× lipat dari harga ini.
         </div>
 
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
-          {[
-            ['semi_privat_normal', 'Semi Privat · Normal'],
-            ['semi_privat_abk', 'Semi Privat · ABK'],
-            ['eksklusif_normal', 'Eksklusif · Normal'],
-            ['eksklusif_abk', 'Eksklusif · ABK'],
-            ['adik_kakak_normal', 'Adik Kakak · Normal (per anak)'],
-            ['adik_kakak_abk', 'Adik Kakak · ABK (per anak)'],
-          ].map(([key, label]) => (
-            <div key={key}>
-              <label className="text-[10.5px] text-text-muted block mb-1">{label}</label>
-              <div className="flex items-center border border-border rounded-md overflow-hidden focus-within:border-blue">
-                <span className="px-2 text-[12px] text-text-muted bg-bg-2">Rp</span>
-                <input
+        <div className="border border-border rounded-lg overflow-hidden">
+          {/* Judul kolom sekali saja di atas */}
+          <div className="grid grid-cols-[minmax(0,1fr)_88px_88px] gap-2 items-center pl-[15px] pr-3 py-1.5 bg-bg-2 border-b border-border">
+            <span className="text-[10.5px] font-semibold text-text-muted uppercase tracking-wide">Paket · Rp</span>
+            <span className="justify-self-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-blue-light text-blue">Normal</span>
+            <span className="justify-self-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-yellow/10 text-yellow">ABK</span>
+          </div>
+          {HARGA_GROUP.map((g) => (
+            <div key={g.judul}
+              className="grid grid-cols-[minmax(0,1fr)_88px_88px] gap-2 items-center pl-3 pr-3 py-2 border-l-[3px] border-l-blue border-b border-b-border last:border-b-0">
+              <div className="min-w-0">
+                <div className="text-[12.5px] font-bold text-text leading-tight">{g.judul}</div>
+                <div className="text-[10px] text-text-muted truncate">{g.ket}</div>
+              </div>
+              {g.fields.map(([key, label]) => (
+                <input key={key}
+                  id={`harga-${key}`}
+                  aria-label={`${g.judul} ${label}`}
                   value={hargaForm[key] ?? ''}
                   onChange={(e) => ubahHargaForm(key, e.target.value)}
                   inputMode="numeric"
-                  className="flex-1 px-2 py-1.5 text-[13px] text-text focus:outline-none min-w-0"
+                  placeholder="0"
+                  className={`w-full min-w-0 border border-border rounded-md px-2 py-1.5 text-[12.5px] text-right text-text focus:outline-none focus:border-blue ${g.fields.length === 1 ? 'col-span-2' : ''}`}
                 />
-              </div>
+              ))}
             </div>
           ))}
         </div>
@@ -278,8 +315,39 @@ export default function SlotPage() {
         </div>
       )}
 
-      {/* Slot per kolam */}
-      {Object.entries(grouped).map(([kolam, kolamSlots]) => (
+      {/* Tab coach */}
+      <div className="flex gap-1 mb-3 bg-bg border border-border rounded-xl p-1">
+        {COACH_LIST.map((c) => (
+          <button key={c} onClick={() => gantiCoach(c)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[13px] font-semibold transition-all ${coachAktif === c ? 'bg-[#185FA5] text-white shadow' : 'text-text-muted hover:text-text'}`}>
+            <i className="ti ti-user text-base" />Coach {c}
+          </button>
+        ))}
+      </div>
+
+      {/* Pill kolam (dinamis dari data coach ini) */}
+      {daftarKolam.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {daftarKolam.map((k) => (
+            <button key={k} onClick={() => setKolamAktif(k)}
+              className={`px-3.5 py-1.5 rounded-full text-[12px] font-semibold border transition-colors ${
+                kolamTampil === k
+                  ? 'bg-blue text-white border-blue'
+                  : 'bg-bg border-border text-text-muted hover:border-blue/40'}`}>
+              {k}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!loading && slots.length > 0 && slotsCoach.length === 0 && (
+        <div className="text-center py-8 text-text-muted text-[12px]">
+          Belum ada jadwal untuk Coach {coachAktif}. Tambahkan di tab <strong>Jadwal</strong>.
+        </div>
+      )}
+
+      {/* Slot per kolam (hanya kolam terpilih) */}
+      {Object.entries(grouped).filter(([kolam]) => kolam === kolamTampil).map(([kolam, kolamSlots]) => (
         <div key={kolam} className="mb-5">
           <div className="flex items-center gap-2 mb-2.5">
             <div className="w-2 h-2 rounded-full bg-blue flex-shrink-0" />
@@ -381,10 +449,10 @@ export default function SlotPage() {
           <div className="text-[10px] font-semibold text-text-muted uppercase tracking-wide mb-2">Preview di form pendaftaran</div>
           <div className="flex flex-col gap-1">
             {slots.map(s => (
-              <div key={`${s.hari}${s.jam_mulai}${s.kolam}`}
+              <div key={`${s.hari}${s.jam_mulai}${s.kolam}${s.coach}`}
                 className={`flex items-center gap-2 text-[12px] py-0.5 ${s.status === 'penuh' ? 'opacity-40' : ''}`}>
                 <i className={`ti ${s.status === 'tersedia' ? 'ti-circle-check text-green' : 'ti-circle-x text-red'} text-sm flex-shrink-0`} />
-                <span className="text-text">{s.kolam} · {s.hari} {s.jam_mulai}–{s.jam_selesai}</span>
+                <span className="text-text">{s.kolam} · Coach {s.coach} · {s.hari} {s.jam_mulai}–{s.jam_selesai}</span>
                 {s.status === 'penuh' ? (
                   <span className="text-[10px] text-red font-semibold ml-auto">Penuh</span>
                 ) : s.kuota !== null && (

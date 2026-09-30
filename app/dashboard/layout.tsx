@@ -8,7 +8,7 @@ import NotificationSetup from '@/components/ui/NotificationSetup'
 import Modal from '@/components/ui/Modal'
 
 const NAV = [
-  { tab: 'hari-ini',   href: '/dashboard',          icon: 'ti-calendar-check', label: 'Hari Ini' },
+  { tab: 'hari-ini',   href: '/dashboard',          icon: 'ti-calendar-check', label: 'Absensi' },
   { tab: 'murid',      href: '/dashboard/murid',     icon: 'ti-users',          label: 'Murid' },
   { tab: 'jadwal',     href: '/dashboard/jadwal',    icon: 'ti-clock',          label: 'Jadwal' },
   { tab: 'rekap',      href: '/dashboard/rekap',     icon: 'ti-chart-bar',      label: 'Rekap' },
@@ -110,7 +110,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </aside>
 
       {/* ── MAIN ── */}
-      <div className="flex-1 lg:ml-[220px] bg-bg min-h-screen flex flex-col">
+      <div className="flex-1 min-w-0 lg:ml-[220px] bg-bg min-h-screen flex flex-col">
         {/* Mobile topbar */}
         <div className="lg:hidden sticky top-0 z-20 bg-bg border-b border-border px-4 py-3 flex items-center gap-[10px]">
           <img src="/logo-app.png" alt="Logo" className="w-8 h-8 rounded-md flex-shrink-0 object-cover" />

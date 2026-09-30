@@ -98,7 +98,7 @@ export default function DaftarPage() {
               jadwal_kolam: jadwalList[0]?.kolam ?? '',
               harga: hargaPerAnak,
               jumlah_sesi: d.jumlah_sesi ?? 4,
-              pemilik: d.pemilik || 'Ilham',
+              pemilik: d.pemilik || 'Ilham', coach: d.coach || 'Ilham',
               kelompok_adik_kakak: d.id,
             }, jadwalList)
           }
@@ -113,7 +113,7 @@ export default function DaftarPage() {
             jadwal_kolam: jadwalList[0]?.kolam ?? '',
             harga: d.harga ?? 0,
             jumlah_sesi: d.jumlah_sesi ?? 4,
-            pemilik: d.pemilik || 'Ilham',
+            pemilik: d.pemilik || 'Ilham', coach: d.coach || 'Ilham',
           }, jadwalList)
         }
         showToast(`${d.nama_murid} diterima ✓`, 'success')

@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import { getMurid, addMurid, updateMurid, deleteMurid, getJadwalSlot, getPemilikSuggestions, getMuridJadwalByMurid, replaceMuridJadwal, getJadwalPenggantiByMurid, addJadwalPengganti, deleteJadwalPengganti, getHargaSetting, getPeriodeBerjalan, Murid, JadwalSlot, MuridJadwal, JadwalPengganti, PeriodeInfo } from '@/lib/supabase'
-import { PAKET_LIST, KATEGORI_LIST, KOLAM_PRESETS, DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP, fmtShort } from '@/lib/utils'
+import { PAKET_LIST, KATEGORI_LIST, COACH_LIST, KOLAM_PRESETS, DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, fmtRupiah, formatRibuan, parseRibuan, PEMILIK_TETAP, fmtShort } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
 import Avatar from '@/components/ui/Avatar'
@@ -29,6 +29,7 @@ export default function MuridPage() {
     jumlah_sesi: 4 as 4 | 8,
     jadwal_hari: '', jadwal_jam: '', jadwal_kolam: KOLAM_PRESETS[0],
     harga: DEFAULT_HARGA_SETTING.semi_privat_normal,
+    coach: 'Ilham',
     pemilik: 'Ilham',
   })
 
@@ -61,6 +62,14 @@ export default function MuridPage() {
 
   const [jadwalPilihan, setJadwalPilihan] = useState<{ hari: string; jam_mulai: string; kolam: string }[]>([])
   const maxJadwal = form.jumlah_sesi === 8 ? 2 : 1
+  // Slot jadwal di form ini hanya milik coach yang dipilih
+  const slotsCoachForm = jadwalSlots.filter((s) => (s.coach ?? 'Ilham') === form.coach)
+  // Pill kolam: default = kolam dari jadwal yang sudah dipilih, kalau belum ada → kolam pertama
+  const [kolamAktifForm, setKolamAktifForm] = useState('')
+  const daftarKolamForm = Array.from(new Set(slotsCoachForm.map((s) => s.kolam)))
+  const kolamDipilih = jadwalPilihan[0]?.kolam ?? ''
+  const kolamTampilForm = daftarKolamForm.includes(kolamAktifForm) ? kolamAktifForm
+    : daftarKolamForm.includes(kolamDipilih) ? kolamDipilih : (daftarKolamForm[0] ?? '')
 
   const toggleJadwal = (s: JadwalSlot) => {
     setJadwalPilihan((prev) => {
@@ -286,7 +295,7 @@ export default function MuridPage() {
   const resetForm = () => {
     setForm({ nama: '', paket: PAKET_LIST[0], wa_ortu: '', kategori: 'normal',
       jumlah_sesi: 4, jadwal_hari: '', jadwal_jam: '', jadwal_kolam: KOLAM_PRESETS[0],
-      harga: hitungHarga(hargaSetting, PAKET_LIST[0], 'normal', 4), pemilik: 'Ilham' })
+      harga: hitungHarga(hargaSetting, PAKET_LIST[0], 'normal', 4), pemilik: 'Ilham', coach: 'Ilham' })
     setJadwalPilihan([])
     setPakaiCustomPemilik(false)
     setEditingId(null)
@@ -318,6 +327,7 @@ export default function MuridPage() {
       jadwal_kolam: m.jadwal_kolam ?? KOLAM_PRESETS[0],
       harga: m.harga ?? hitungHarga(hargaSetting, m.paket, m.kategori, m.jumlah_sesi ?? 4),
       pemilik: pemilikMurid,
+      coach: m.coach ?? 'Ilham',
     })
     // Prefill children: murid lama jadi Anak 1, Anak 2 kosong
     // Ini dipakai saat user mengubah paket ke Adik Kakak dari Edit
@@ -357,6 +367,7 @@ export default function MuridPage() {
       jadwal_kolam: first.jadwal_kolam ?? KOLAM_PRESETS[0],
       harga: totalHarga,
       pemilik: pemilikMurid,
+      coach: first.coach ?? 'Ilham',
     })
     setShowAdd(true)
     try {
@@ -397,6 +408,7 @@ export default function MuridPage() {
             harga: hargaPerAnak,
             jumlah_sesi: form.jumlah_sesi,
             pemilik: form.pemilik,
+            coach: form.coach,
           })
           await replaceMuridJadwal(child.id, jadwalPilihan)
         }
@@ -427,6 +439,7 @@ export default function MuridPage() {
             harga: hargaPerAnak,
             jumlah_sesi: form.jumlah_sesi,
             pemilik: form.pemilik,
+            coach: form.coach,
           })
           await replaceMuridJadwal(editingId, jadwalPilihan)
           muridIds.push(editingId)
@@ -442,6 +455,7 @@ export default function MuridPage() {
               harga: hargaPerAnak,
               jumlah_sesi: form.jumlah_sesi,
               pemilik: form.pemilik,
+              coach: form.coach,
             }
             const newMurid = await addMurid(payload, jadwalPilihan)
             muridIds.push(newMurid.id)
@@ -458,6 +472,7 @@ export default function MuridPage() {
               harga: hargaPerAnak,
               jumlah_sesi: form.jumlah_sesi,
               pemilik: form.pemilik,
+              coach: form.coach,
             }
             const newMurid = await addMurid(payload, jadwalPilihan)
             muridIds.push(newMurid.id)
@@ -604,6 +619,7 @@ export default function MuridPage() {
                   <div className="flex items-center gap-2">
                     <div className="text-[14px] font-semibold text-text truncate">{m.nama}</div>
                     {m.kategori === 'abk' && <span className="bg-yellow/10 text-yellow text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">ABK</span>}
+                    <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">Coach {m.coach ?? 'Ilham'}</span>
                     {m.pemilik && m.pemilik !== 'Ilham' && (
                       <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5">
                         <i className="ti ti-building-bank text-[10px]" />{m.pemilik}
@@ -660,6 +676,7 @@ export default function MuridPage() {
                     <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">
                       {g.members.length} anak
                     </span>
+                    <span className="bg-blue-light text-blue text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">Coach {first.coach ?? 'Ilham'}</span>
                   </div>
                   <div className="text-[12px] text-text-muted">{first.paket} · {first.jumlah_sesi ?? 4}x/bulan</div>
                   <div className="text-[12px] font-semibold text-blue mt-0.5">{fmtRupiah(totalHarga)}/bulan</div>
@@ -853,6 +870,19 @@ export default function MuridPage() {
           )}
 
           <div>
+            <label className="text-[12px] text-text-muted block mb-1.5">Coach</label>
+            <div className="flex gap-2">
+              {COACH_LIST.map((c) => (
+                <button key={c}
+                  onClick={() => { if (form.coach !== c) { setForm(prev => ({ ...prev, coach: c })); setJadwalPilihan([]) } }}
+                  className={`flex-1 py-2 rounded-md border text-[12px] font-medium transition-all ${form.coach === c ? 'bg-blue-light border-blue text-blue' : 'border-border text-text-muted'}`}>
+                  Coach {c}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
             <label className="text-[12px] text-text-muted block mb-1.5">Pemilik (rekening penagihan)</label>
             <div className="flex flex-wrap gap-2">
               {PEMILIK_TETAP.map((p) => (
@@ -934,13 +964,24 @@ export default function MuridPage() {
               </div>
             )}
 
-            {jadwalSlots.length > 0 ? (
+            {daftarKolamForm.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {daftarKolamForm.map((k) => (
+                  <button key={k} type="button" onClick={() => setKolamAktifForm(k)}
+                    className={`px-3 py-1.5 rounded-full border text-[12px] font-semibold transition-all ${kolamTampilForm === k ? 'bg-blue text-white border-blue' : 'border-border text-text-muted hover:border-blue/40'}`}>
+                    {k}{jadwalPilihan.some((p) => p.kolam === k) ? ' •' : ''}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {slotsCoachForm.length > 0 ? (
               Object.entries(
-                jadwalSlots.reduce<Record<string, JadwalSlot[]>>((acc, s) => {
+                slotsCoachForm.reduce<Record<string, JadwalSlot[]>>((acc, s) => {
                   acc[s.kolam] = acc[s.kolam] ? [...acc[s.kolam], s] : [s]
                   return acc
                 }, {})
-              ).map(([kolam, slots]) => (
+              ).filter(([kolam]) => kolam === kolamTampilForm).map(([kolam, slots]) => (
                 <div key={kolam} className="mb-3">
                   <div className="text-[11px] font-bold text-text-muted mb-1.5 flex items-center gap-1.5">
                     <div className="w-1.5 h-1.5 rounded-full bg-blue" />{kolam}

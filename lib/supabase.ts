@@ -22,6 +22,7 @@ export interface Murid {
   aktif: boolean
   pemilik: string
   kelompok_adik_kakak?: string | null
+  coach?: string        // 'Ilham' | 'Riska' (default DB: Ilham)
 }
 
 export interface Sesi {
@@ -64,6 +65,7 @@ export interface JadwalTemplate {
   hari: string        // 'Senin', 'Selasa', dst
   jam_mulai: string   // '15:00'
   jam_selesai: string // '16:00'
+  coach: string       // 'Ilham' | 'Riska'
   durasi: number
   kolam: string
   aktif: boolean
@@ -92,6 +94,7 @@ export interface PendingMember {
   diskon?: number
   anak_list?: AnakAdikKakak[] | null
   jumlah_anak?: number | null
+  coach?: string | null
 }
 
 // ── DB helpers ─────────────────────────────────────────────────────────────
@@ -816,6 +819,7 @@ export interface SlotInfo {
   kolam: string
   status: 'tersedia' | 'penuh'
   kuota: number | null
+  coach: string
 }
 
 export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
@@ -827,13 +831,14 @@ export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
   const statusMap: Record<string, 'tersedia' | 'penuh'> = {}
   const kuotaMap: Record<string, number | null> = {}
   ;(statusData as any[]).forEach((s) => {
-    const key = `${s.hari}__${s.jam_mulai}__${s.kolam}`
+    const key = `${s.hari}__${s.jam_mulai}__${s.kolam}__${s.coach ?? 'Ilham'}`
     statusMap[key] = s.status
     kuotaMap[key] = s.kuota ?? null
   })
 
   return templates.map((t) => {
-    const key = `${t.hari}__${t.jam_mulai}__${t.kolam}`
+    const coach = t.coach ?? 'Ilham'
+    const key = `${t.hari}__${t.jam_mulai}__${t.kolam}__${coach}`
     const kuota = kuotaMap[key] ?? null
     const statusDariDB = statusMap[key] ?? 'tersedia'
     // Kalau kuota sudah 0, paksa status penuh — override apapun yang ada di DB
@@ -843,6 +848,7 @@ export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
       jam_mulai: t.jam_mulai,
       jam_selesai: t.jam_selesai,
       kolam: t.kolam,
+      coach,
       status,
       kuota,
     }
@@ -850,28 +856,28 @@ export const getSlotDariJadwal = async (): Promise<SlotInfo[]> => {
 }
 
 // Klik tombol "Penuh" manual → status penuh, kuota otomatis 0
-export const setSlotPenuh = async (hari: string, jam_mulai: string, kolam: string) => {
+export const setSlotPenuh = async (hari: string, jam_mulai: string, kolam: string, coach: string) => {
   const { error } = await supabase
     .from('slot_status')
-    .upsert({ hari, jam_mulai, kolam, status: 'penuh', kuota: 0 }, { onConflict: 'hari,jam_mulai,kolam' })
+    .upsert({ hari, jam_mulai, kolam, coach, status: 'penuh', kuota: 0 }, { onConflict: 'hari,jam_mulai,kolam,coach' })
   if (error) throw error
 }
 
 // Klik tombol "Tersedia" manual (dari kondisi penuh) → status tersedia, kuota default 1 kalau belum ada
-export const setSlotTersedia = async (hari: string, jam_mulai: string, kolam: string, kuotaDefault = 1) => {
+export const setSlotTersedia = async (hari: string, jam_mulai: string, kolam: string, coach: string, kuotaDefault = 1) => {
   const { error } = await supabase
     .from('slot_status')
-    .upsert({ hari, jam_mulai, kolam, status: 'tersedia', kuota: kuotaDefault }, { onConflict: 'hari,jam_mulai,kolam' })
+    .upsert({ hari, jam_mulai, kolam, coach, status: 'tersedia', kuota: kuotaDefault }, { onConflict: 'hari,jam_mulai,kolam,coach' })
   if (error) throw error
 }
 
 // Ketik/atur angka sisa kuota manual → status mengikuti otomatis (0 = penuh, >0 = tersedia)
-export const setSlotKuota = async (hari: string, jam_mulai: string, kolam: string, kuota: number) => {
+export const setSlotKuota = async (hari: string, jam_mulai: string, kolam: string, coach: string, kuota: number) => {
   const kuotaFinal = Math.max(0, kuota)
   const status = kuotaFinal > 0 ? 'tersedia' : 'penuh'
   const { error } = await supabase
     .from('slot_status')
-    .upsert({ hari, jam_mulai, kolam, status, kuota: kuotaFinal }, { onConflict: 'hari,jam_mulai,kolam' })
+    .upsert({ hari, jam_mulai, kolam, coach, status, kuota: kuotaFinal }, { onConflict: 'hari,jam_mulai,kolam,coach' })
   if (error) throw error
 }
 
@@ -992,6 +998,7 @@ export const getHargaSetting = async (): Promise<HargaSetting> => {
     eksklusif_abk: data.eksklusif_abk ?? DEFAULT_HARGA_SETTING.eksklusif_abk,
     adik_kakak_normal: data.adik_kakak_normal ?? DEFAULT_HARGA_SETTING.adik_kakak_normal,
     adik_kakak_abk: data.adik_kakak_abk ?? DEFAULT_HARGA_SETTING.adik_kakak_abk,
+    dewasa_eksklusif: data.dewasa_eksklusif ?? DEFAULT_HARGA_SETTING.dewasa_eksklusif,
   }
 }
 

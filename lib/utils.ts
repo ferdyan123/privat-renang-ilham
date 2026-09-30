@@ -52,6 +52,7 @@ export interface HargaSetting {
   eksklusif_abk: number
   adik_kakak_normal: number  // per anak
   adik_kakak_abk: number     // per anak
+  dewasa_eksklusif: number   // Dewasa: cuma paket Eksklusif (per 4x)
 }
 
 export const DEFAULT_HARGA_SETTING: HargaSetting = {
@@ -61,12 +62,14 @@ export const DEFAULT_HARGA_SETTING: HargaSetting = {
   eksklusif_abk: 1200000,
   adik_kakak_normal: 500000,
   adik_kakak_abk: 600000,
+  dewasa_eksklusif: 1000000,
 }
 
 // Harga paket biasa (Semi Privat / Eksklusif) berdasarkan setting + kategori + jumlah sesi
 export const hitungHarga = (setting: HargaSetting, paket: string, kategori: string, jumlahSesi: number): number => {
   const multiplier = jumlahSesi === 8 ? 2 : 1
   const isAbk = kategori === 'abk'
+  if (kategori === 'dewasa') return paket === 'Eksklusif' ? setting.dewasa_eksklusif * multiplier : 0
   if (paket === 'Semi Privat') return (isAbk ? setting.semi_privat_abk : setting.semi_privat_normal) * multiplier
   if (paket === 'Eksklusif') return (isAbk ? setting.eksklusif_abk : setting.eksklusif_normal) * multiplier
   return 0
@@ -102,6 +105,9 @@ export const parseRibuan = (str: string): number => {
 export const KOLAM_PRESETS = ['Kolam A', 'Kolam B', 'Kolam VIP']
 // Alias untuk kompatibilitas file lama yang masih import KOLAM_LIST
 export const KOLAM_LIST = KOLAM_PRESETS
+
+// Coach — dipakai di Jadwal Tetap, halaman Slot (tab), dan form /daftar
+export const COACH_LIST = ['Ilham', 'Riska']
 
 export const HARI_LIST = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min']
 export const COLORS = ['#185FA5', '#1D9E75', '#7F77DD', '#D85A30', '#D4537E', '#BA7517', '#639922']

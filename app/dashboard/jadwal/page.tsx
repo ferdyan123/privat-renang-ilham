@@ -6,7 +6,7 @@ import {
   getJadwalTemplate, addJadwalTemplate, updateJadwalTemplate, deleteJadwalTemplate,
   Sesi, Murid, MuridJadwal, JadwalPengganti, JadwalTemplate,
 } from '@/lib/supabase'
-import { fmtTgl, jamSelesai, todayStr, KOLAM_PRESETS } from '@/lib/utils'
+import { fmtTgl, jamSelesai, todayStr, KOLAM_PRESETS, COACH_LIST } from '@/lib/utils'
 import { showToast } from '@/components/ui/Toast'
 import Modal from '@/components/ui/Modal'
 
@@ -25,7 +25,7 @@ export default function JadwalPage() {
   const [editingT, setEditingT] = useState<JadwalTemplate | null>(null)
   const [savingT, setSavingT] = useState(false)
   const [formT, setFormT] = useState({
-    hari: 'Senin', jam_mulai_h: '07', jam_mulai_m: '00', durasi: 60, kolam: KOLAM_PRESETS[0],
+    hari: 'Senin', jam_mulai_h: '07', jam_mulai_m: '00', durasi: 60, kolam: KOLAM_PRESETS[0], coach: 'Ilham',
   })
   const [kolamCustomT, setKolamCustomT] = useState(false)
 
@@ -77,13 +77,13 @@ export default function JadwalPage() {
   }
 
   const resetFormT = () => {
-    setFormT({ hari: 'Senin', jam_mulai_h: '07', jam_mulai_m: '00', durasi: 60, kolam: KOLAM_PRESETS[0] })
+    setFormT({ hari: 'Senin', jam_mulai_h: '07', jam_mulai_m: '00', durasi: 60, kolam: KOLAM_PRESETS[0], coach: 'Ilham' })
     setKolamCustomT(false); setEditingT(null)
   }
 
   const openEditT = (t: JadwalTemplate) => {
     const [h, m] = t.jam_mulai.split(':')
-    setFormT({ hari: t.hari, jam_mulai_h: h, jam_mulai_m: m, durasi: t.durasi, kolam: t.kolam })
+    setFormT({ hari: t.hari, jam_mulai_h: h, jam_mulai_m: m, durasi: t.durasi, kolam: t.kolam, coach: t.coach ?? 'Ilham' })
     setKolamCustomT(!KOLAM_PRESETS.includes(t.kolam))
     setEditingT(t); setShowTambahT(true)
   }
@@ -94,7 +94,7 @@ export default function JadwalPage() {
     try {
       const jam_mulai = `${formT.jam_mulai_h}:${formT.jam_mulai_m}`
       const jam_selesai = hitungJamSelesai(formT.jam_mulai_h, formT.jam_mulai_m, formT.durasi)
-      const payload = { hari: formT.hari, jam_mulai, jam_selesai, durasi: formT.durasi, kolam: formT.kolam }
+      const payload = { hari: formT.hari, jam_mulai, jam_selesai, durasi: formT.durasi, kolam: formT.kolam, coach: formT.coach }
       if (editingT) {
         await updateJadwalTemplate(editingT.id, payload)
         showToast('Jadwal tetap diperbarui ✓', 'success')
@@ -308,8 +308,19 @@ export default function JadwalPage() {
                     className="w-full border border-border rounded-md px-3 py-2 text-sm bg-bg text-text" />
                 )}
               </div>
+              <div>
+                <label className="text-[12px] text-text-muted block mb-1">Coach</label>
+                <div className="flex gap-2 flex-wrap">
+                  {COACH_LIST.map((c) => (
+                    <button key={c} onClick={() => setFormT(f => ({ ...f, coach: c }))}
+                      className={`px-3 py-1.5 rounded-full border text-[12px] font-medium transition-all ${formT.coach === c ? 'bg-blue text-white border-blue' : 'border-border text-text-muted'}`}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="text-[11px] text-blue bg-blue-light/50 rounded-md px-3 py-2">
-                Preview: <strong>{formT.hari} {formT.jam_mulai_h}:{formT.jam_mulai_m} – {hitungJamSelesai(formT.jam_mulai_h, formT.jam_mulai_m, formT.durasi)}</strong> · {formT.kolam} · tiap minggu
+                Preview: <strong>{formT.hari} {formT.jam_mulai_h}:{formT.jam_mulai_m}–{hitungJamSelesai(formT.jam_mulai_h, formT.jam_mulai_m, formT.durasi)}</strong> · {formT.kolam} · Coach: {formT.coach} · tiap minggu
               </div>
               <button onClick={handleSaveT} disabled={savingT}
                 className="w-full bg-[#185FA5] text-white rounded-md py-2.5 text-sm font-semibold mt-1 hover:bg-[#0C447C] disabled:opacity-50 transition-all">

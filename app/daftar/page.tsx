@@ -2,7 +2,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { supabase, getJadwalSlot, JadwalSlot, adaPromoAktif, validasiPromo, pakaiPromo, PromoInfo, getHargaSetting } from '@/lib/supabase'
-import { DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, hitungHargaAdikKakak, ADIK_KAKAK_MIN, ADIK_KAKAK_MAX, POTONGAN_ADIK_KAKAK, PERATURAN_SESI, fmtRupiah, getRekeningByPemilik } from '@/lib/utils'
+import { DEFAULT_HARGA_SETTING, HargaSetting, hitungHarga, hitungHargaAdikKakak, COACH_LIST, ADIK_KAKAK_MIN, ADIK_KAKAK_MAX, POTONGAN_ADIK_KAKAK, PERATURAN_SESI, fmtRupiah, getRekeningByPemilik } from '@/lib/utils'
 import { ToastProvider, showToast } from '@/components/ui/Toast'
 
 const KELAS_LIST = [
@@ -67,7 +67,7 @@ function DaftarPublikPageContent() {
 
   const [form, setForm] = useState({
     nama_murid: '', usia: '', jenis_kelamin: '', kategori: '',
-    paket: '', jumlah_sesi: '4', jadwal_hari: '', jadwal_jam: '', catatan: '',
+    paket: '', coach: '', jumlah_sesi: '4', jadwal_hari: '', jadwal_jam: '', catatan: '',
     nama_ortu: '', wa_ortu: '',
   })
 
@@ -124,6 +124,34 @@ function DaftarPublikPageContent() {
     getHargaSetting().then(setHargaSetting).catch(() => {})
   }, [])
 
+  const isDewasa = form.kategori === 'dewasa'
+  const namaKontak = isDewasa ? form.nama_murid : form.nama_ortu
+  const labelKategori = form.kategori === 'abk' ? '⭐ ABK' : isDewasa ? '🧑 Dewasa' : '🏊 Anak Normal'
+  // Dewasa cuma paket Eksklusif (Semi Privat & Adik Kakak disembunyikan)
+  const kelasTersedia = isDewasa ? KELAS_LIST.filter((k) => k.id === 'eksklusif') : KELAS_LIST
+  // Jadwal difilter by coach yang dipilih
+  const slotsCoach = jadwalSlots.filter((s) => s.coach === form.coach)
+  // Pill kolam di daftar jadwal (default: kolam pertama yang punya data)
+  const [kolamAktif, setKolamAktif] = useState('')
+  const daftarKolam = Array.from(new Set(slotsCoach.map((s) => s.kolam)))
+  const kolamTampil = daftarKolam.includes(kolamAktif) ? kolamAktif : (daftarKolam[0] ?? '')
+
+  // Ganti kategori → reset paket & jadwal kalau paket lama tidak berlaku untuk kategori baru
+  const pilihKategori = (k: string) => {
+    up('kategori', k)
+    if (k === 'dewasa' && form.paket && form.paket !== 'Eksklusif') {
+      up('paket', '')
+      setJadwalPilihan([])
+    }
+  }
+
+  // Ganti coach → kosongkan jadwal terpilih (jadwal coach lain tidak boleh terbawa)
+  const pilihCoach = (c: string) => {
+    if (form.coach === c) return
+    up('coach', c)
+    setJadwalPilihan([])
+  }
+
   // Hitung harga berdasarkan pilihan
   const hargaSekarang = form.paket === 'Adik Kakak'
     ? (form.kategori ? hitungHargaAdikKakak(hargaSetting, form.kategori, jumlahAnakAdikKakak, parseInt(form.jumlah_sesi)) : 0)
@@ -151,9 +179,9 @@ function DaftarPublikPageContent() {
   }
 
   const stepValid = () => {
-    if (step === 0) return form.nama_murid.trim() && form.usia && form.jenis_kelamin && form.kategori && form.nama_ortu.trim() && form.wa_ortu.trim()
+    if (step === 0) return form.nama_murid.trim() && form.usia && form.jenis_kelamin && form.kategori && (isDewasa || form.nama_ortu.trim()) && form.wa_ortu.trim()
     if (step === 1) {
-      if (!form.paket || !form.jumlah_sesi || jadwalPilihan.length !== maxJadwal) return false
+      if (!form.coach || !form.paket || !form.jumlah_sesi || jadwalPilihan.length !== maxJadwal) return false
       if (form.paket === 'Adik Kakak') {
         return anakTambahan.every((a) => a.nama.trim() && a.usia)
       }
@@ -196,14 +224,14 @@ function DaftarPublikPageContent() {
       const { error } = await supabase.from('pending_members').insert({
         nama_murid: namaGabungan,
         usia: parseInt(form.usia),
-        nama_ortu: form.nama_ortu,
+        nama_ortu: namaKontak,
         wa_ortu: form.wa_ortu,
         paket: form.paket + (form.kategori === 'abk' ? ' +ABK' : '') + ' ' + form.jumlah_sesi + 'x' + (isAdikKakak ? ` (${jumlahAnakAdikKakak} anak)` : ''),
         jadwal_hari: jadwalHariGabungan,
         jadwal_jam: jadwalJamGabungan,
         jadwal_kolam: jadwalPilihan.map((s) => s.kolam).join(', '),
         bukti_tf_url,
-        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Sesi: ${form.jumlah_sesi}x | Jadwal: ${jadwalRingkas} | Harga: ${fmtRupiah(hargaSekarang)}${promoValid ? ` | Promo: ${promoValid.kode} (-${fmtRupiah(diskonAktif)})` : ''}${form.catatan ? ' | ' + form.catatan : ''}`,
+        catatan: `JK: ${form.jenis_kelamin} | Kategori: ${form.kategori} | Coach: ${form.coach} | Sesi: ${form.jumlah_sesi}x | Jadwal: ${jadwalRingkas} | Harga: ${fmtRupiah(hargaSekarang)}${promoValid ? ` | Promo: ${promoValid.kode} (-${fmtRupiah(diskonAktif)})` : ''}${form.catatan ? ' | ' + form.catatan : ''}`,
         jumlah_sesi: parseInt(form.jumlah_sesi),
         harga: totalSetelahDiskon, // total keluarga — pembagian per anak dilakukan saat ACC
         kode_promo: promoValid?.kode ?? null,
@@ -212,6 +240,8 @@ function DaftarPublikPageContent() {
         jumlah_anak: isAdikKakak ? jumlahAnakAdikKakak : 1,
         status: 'menunggu',
         pemilik,
+        coach: form.coach,
+        kategori: form.kategori,
       })
       if (error) throw error
 
@@ -237,14 +267,14 @@ function DaftarPublikPageContent() {
         <div className="text-5xl mb-3">🎉</div>
         <div className="text-[20px] font-bold text-gray-800 mb-2">Pendaftaran Berhasil!</div>
         <div className="text-[14px] text-gray-500 mb-4">
-          Halo <strong>{form.nama_ortu}</strong>!<br/>
+          Halo <strong>{namaKontak}</strong>!<br/>
           Pendaftaran <strong>{form.paket === 'Adik Kakak' ? [form.nama_murid, ...anakTambahan.map(a=>a.nama)].filter(Boolean).join(', ') : form.nama_murid}</strong> sudah kami terima dengan baik.
         </div>
         <div className="bg-[#E6F4FB] rounded-xl p-4 text-left text-[13px] text-gray-600 mb-4 space-y-1">
           <div className="font-semibold text-[#185FA5] mb-1.5">Ringkasan Pendaftaran</div>
           <div>Kelas: <strong>{form.paket} ({form.jumlah_sesi}x/bulan)</strong></div>
           <div>Jadwal: <strong>{jadwalPilihan.map((s) => `${s.hari} ${s.jam_mulai}`).join(', ')}</strong></div>
-          <div>Kategori: <strong>{form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'}</strong></div>
+          <div>Kategori: <strong>{labelKategori}</strong></div>
         </div>
         {/* Peraturan Sesi Privat — muncul setelah pendaftaran+bukti TF terkirim */}
         <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 text-left mb-4">
@@ -257,7 +287,7 @@ function DaftarPublikPageContent() {
         </div>
         <div className="text-[12px] text-gray-400 leading-relaxed">
           Admin akan menghubungi melalui WhatsApp untuk konfirmasi.<br/>
-          Kita siap bantu si kecil belajar renang dengan penuh semangat! 💦
+          Kita siap bantu {isDewasa ? 'kamu' : 'si kecil'} belajar renang dengan penuh semangat! 💦
         </div>
       </div>
       <ToastProvider />
@@ -325,7 +355,7 @@ function DaftarPublikPageContent() {
               </div>
               <div>
                 <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Nama Lengkap</label>
-                <input type="text" placeholder="Nama lengkap anak" value={form.nama_murid}
+                <input type="text" placeholder={isDewasa ? "Nama lengkap peserta" : "Nama lengkap anak"} value={form.nama_murid}
                   onChange={(e) => up('nama_murid', e.target.value)}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-gray-800 focus:outline-none focus:border-[#185FA5] focus:ring-1 focus:ring-[#185FA5]/20" />
               </div>
@@ -351,7 +381,7 @@ function DaftarPublikPageContent() {
               <div>
                 <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Kategori</label>
                 <div className="flex flex-col gap-2">
-                  <button onClick={() => up('kategori', 'normal')}
+                  <button onClick={() => pilihKategori('normal')}
                     className={`text-left px-3.5 py-3 rounded-xl border-2 transition-all ${form.kategori === 'normal' ? 'border-[#185FA5] bg-[#E6F4FB]' : 'border-gray-100 bg-gray-50'}`}>
                     <div className="flex items-center gap-2.5">
                       <span className="text-xl">🏊</span>
@@ -362,7 +392,7 @@ function DaftarPublikPageContent() {
                       {form.kategori === 'normal' && <i className="ti ti-check text-[#185FA5] ml-auto" />}
                     </div>
                   </button>
-                  <button onClick={() => up('kategori', 'abk')}
+                  <button onClick={() => pilihKategori('abk')}
                     className={`text-left px-3.5 py-3 rounded-xl border-2 transition-all ${form.kategori === 'abk' ? 'border-yellow-400 bg-yellow-50' : 'border-gray-100 bg-gray-50'}`}>
                     <div className="flex items-center gap-2.5">
                       <span className="text-xl">⭐</span>
@@ -375,17 +405,30 @@ function DaftarPublikPageContent() {
                       {form.kategori === 'abk' && <i className="ti ti-check text-yellow-500" />}
                     </div>
                   </button>
+                  <button onClick={() => pilihKategori('dewasa')}
+                    className={`text-left px-3.5 py-3 rounded-xl border-2 transition-all ${form.kategori === 'dewasa' ? 'border-[#185FA5] bg-[#E6F4FB]' : 'border-gray-100 bg-gray-50'}`}>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xl">🧑</span>
+                      <div>
+                        <div className="text-[13px] font-semibold text-gray-800">Dewasa</div>
+                        <div className="text-[11px] text-gray-400">Program renang untuk orang dewasa</div>
+                      </div>
+                      {form.kategori === 'dewasa' && <i className="ti ti-check text-[#185FA5] ml-auto" />}
+                    </div>
+                  </button>
                 </div>
               </div>
               <div className="border-t border-gray-100 pt-3">
-                <div className="text-[14px] font-bold text-gray-800 mb-3">Data Orang Tua / Wali</div>
+                <div className="text-[14px] font-bold text-gray-800 mb-3">{isDewasa ? 'Kontak' : 'Data Orang Tua / Wali'}</div>
                 <div className="flex flex-col gap-3">
+                  {!isDewasa && (
                   <div>
                     <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Nama Lengkap</label>
                     <input type="text" placeholder="Nama orang tua/wali" value={form.nama_ortu}
                       onChange={(e) => up('nama_ortu', e.target.value)}
                       className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] text-gray-800 focus:outline-none focus:border-[#185FA5]" />
                   </div>
+                  )}
                   <div>
                     <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">No. WhatsApp</label>
                     <input type="tel" placeholder="08xxxxxxxxxx" value={form.wa_ortu}
@@ -404,9 +447,24 @@ function DaftarPublikPageContent() {
                 🏫 Pilihan Kelas & Jadwal
               </div>
               <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Pilih Coach</label>
+                <div className="flex flex-col gap-2">
+                  {COACH_LIST.map((c) => (
+                    <button key={c} onClick={() => pilihCoach(c)}
+                      className={`text-left px-3.5 py-3 rounded-xl border-2 transition-all ${form.coach === c ? 'border-[#185FA5] bg-[#E6F4FB]' : 'border-gray-100 bg-gray-50'}`}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🏊</span>
+                        <div className="flex-1 text-[13px] font-semibold text-gray-800">Coach {c}</div>
+                        {form.coach === c && <i className="ti ti-check text-[#185FA5]" />}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
                 <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1.5">Pilihan Kelas</label>
                 <div className="flex flex-col gap-2">
-                  {KELAS_LIST.map((k) => (
+                  {kelasTersedia.map((k) => (
                     <button key={k.id} onClick={() => up('paket', k.label)}
                       className={`text-left px-3.5 py-3 rounded-xl border-2 transition-all ${form.paket === k.label ? 'border-[#185FA5] bg-[#E6F4FB]' : 'border-gray-100 bg-gray-50'}`}>
                       <div className="flex items-center gap-2">
@@ -491,13 +549,28 @@ function DaftarPublikPageContent() {
                       : `Pilih 1 jadwal (${jadwalPilihan.length}/1 dipilih)`}
                   </span>
                 </div>
+                {jadwalPilihan.length > 0 && (
+                  <div className="text-[11px] text-[#185FA5] mb-2">
+                    Dipilih: <strong>{jadwalRingkas}</strong>
+                  </div>
+                )}
+                {daftarKolam.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {daftarKolam.map((k) => (
+                      <button key={k} onClick={() => setKolamAktif(k)}
+                        className={`px-3 py-1.5 rounded-full border text-[12px] font-semibold transition-all ${kolamTampil === k ? 'bg-[#185FA5] text-white border-[#185FA5]' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-[#185FA5]/40'}`}>
+                        {k}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {/* Group by kolam */}
                 {(() => {
-                  const grouped = jadwalSlots.reduce<Record<string, JadwalSlot[]>>((acc, s) => {
+                  const grouped = slotsCoach.reduce<Record<string, JadwalSlot[]>>((acc, s) => {
                     acc[s.kolam] = acc[s.kolam] ? [...acc[s.kolam], s] : [s]
                     return acc
                   }, {})
-                  return Object.entries(grouped).map(([kolam, slots]) => (
+                  return Object.entries(grouped).filter(([kolam]) => kolam === kolamTampil).map(([kolam, slots]) => (
                     <div key={kolam} className="mb-3">
                       <div className="text-[11px] font-bold text-gray-500 mb-1.5 flex items-center gap-1.5">
                         <div className="w-1.5 h-1.5 rounded-full bg-[#185FA5]" />{kolam}
@@ -550,9 +623,13 @@ function DaftarPublikPageContent() {
                     </div>
                   ))
                 })()}
-                {jadwalSlots.length === 0 && (
+                {!form.coach ? (
                   <div className="text-center py-4 text-gray-400 text-[12px]">
-                    Jadwal belum tersedia. Hubungi admin.
+                    Pilih coach dulu untuk melihat jadwal.
+                  </div>
+                ) : slotsCoach.length === 0 && (
+                  <div className="text-center py-4 text-gray-400 text-[12px]">
+                    Jadwal Coach {form.coach} belum tersedia. Hubungi admin.
                   </div>
                 )}
               </div>
@@ -618,7 +695,7 @@ function DaftarPublikPageContent() {
                       : form.nama_murid],
                     ['Kelas', form.paket === 'Adik Kakak' ? `Adik Kakak (${jumlahAnakAdikKakak} anak)` : form.paket],
                     ['Sesi', form.jumlah_sesi + 'x/bulan'],
-                    ['Kategori', form.kategori === 'abk' ? '⭐ ABK' : '🏊 Anak Normal'],
+                    ['Kategori', labelKategori],
                     ['Jadwal', jadwalPilihan.map((s) => `${s.hari} ${s.jam_mulai}`).join(', ')],
                     ...(promoValid ? [
                       ['Subtotal', hargaSekarang > 0 ? fmtRupiah(hargaSekarang) : '-'],
@@ -681,7 +758,7 @@ function DaftarPublikPageContent() {
               {/* Penutup */}
               <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center text-[12px] text-gray-500 leading-relaxed">
                 Setelah transfer, mohon kirim bukti pembayaran ya 🙏<br/>
-                <span className="text-[#185FA5] font-semibold">Terima kasih!</span> Kita siap bantu si kecil belajar renang dengan pendekatan yang aman, nyaman, dan menyenangkan 💦
+                <span className="text-[#185FA5] font-semibold">Terima kasih!</span> Kita siap bantu {isDewasa ? 'kamu' : 'si kecil'} belajar renang dengan pendekatan yang aman, nyaman, dan menyenangkan 💦
               </div>
             </div>
           )}
