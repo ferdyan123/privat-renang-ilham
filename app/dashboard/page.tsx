@@ -379,7 +379,8 @@ export default function HariIniPage() {
     const jamSesiDisplay = mb.jamSesi // sudah format "07:00"
     const nama = mb.murid.nama
 
-    const pesan = `${sapaan} Bapak/Ibu orang tua ${nama}, kami ingin mengingatkan bahwa ${nama} memiliki jadwal latihan renang besok, ${namaHariBesok} ${tglLengkap} pukul ${jamSesiDisplay}. Mohon hadir tepat waktu. Terima kasih 🏊`
+    const pesan = `${sapaan} Bapak/Ibu orang tua ${nama}, kami ingin mengingatkan bahwa ${nama} memiliki jadwal latihan renang besok, ${namaHariBesok} ${tglLengkap} pukul ${jamSesiDisplay}. Mohon hadir tepat waktu. Terima kasih 🏊
+--- pesan ini dikirim secara otomatis oleh sistem. apabila ada kendala atau berhalangan hadir, mohon untuk membalas pesan ini ya bapak/ibu. terima kasih.`
     const nomorWA = formatWA(mb.murid.wa_ortu)
     const url = `https://wa.me/${nomorWA}?text=${encodeURIComponent(pesan)}`
     window.open(url, '_blank')
@@ -388,7 +389,8 @@ export default function HariIniPage() {
   // ─── Handler kirim WA Hari Ini — sapaan dihitung saat KLIK, bukan saat render ───
   const kirimWAHariIni = (namaMurid: string, noWA: string, jamSesi: string) => {
     const sapaan = getSapaan()
-    const pesan = `${sapaan} Bapak/Ibu orang tua ${namaMurid}.\nMohon maaf mengganggu waktunya, ijin mengingatkan bahwa ${namaMurid} memiliki jadwal latihan renang hari ini pukul ${jamSesi}. Mohon hadir tepat waktu. Terima kasih 🙏🏻`
+    const pesan = `haloo ${sapaan.toLowerCase()} bapak/ibu orang tua dari ${namaMurid}. izin mengingatkan kembali untuk jadwal latihan renang hari ini pukul ${jamSesi} yaa. mohon untuk hadir tepat waktu. terima kasih banyak bapak/ibu 🙏
+--- pesan ini dikirim secara otomatis oleh sistem. apabila ada kendala atau berhalangan hadir, mohon untuk membalas pesan ini ya bapak/ibu. terima kasih.`
     const url = `https://wa.me/${formatWA(noWA)}?text=${encodeURIComponent(pesan)}`
     window.open(url, '_blank')
   }
