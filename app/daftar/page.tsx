@@ -648,43 +648,6 @@ function DaftarPublikPageContent() {
               <div className="text-[14px] font-bold text-gray-800 flex items-center gap-2 pb-1 border-b border-gray-100">
                 💳 Pembayaran
               </div>
-              {/* Kode Referral — cuma muncul kalau ada kode promo aktif */}
-              {showPromoBox && (
-                <div>
-                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">
-                    Kode Referral <span className="normal-case text-gray-300">(opsional)</span>
-                  </label>
-                  {promoValid ? (
-                    <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-3.5 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <i className="ti ti-circle-check text-green-500 text-base" />
-                        <div>
-                          <div className="text-[12px] font-bold text-green-700">{promoValid.kode}</div>
-                          <div className="text-[11px] text-green-600">Potongan {fmtRupiah(diskonAktif)}</div>
-                        </div>
-                      </div>
-                      <button onClick={() => { setPromoValid(null); setKodePromoInput(''); setPromoError('') }}
-                        className="text-[11px] text-gray-400 font-medium">× Hapus</button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex gap-2">
-                        <input
-                          value={kodePromoInput}
-                          onChange={(e) => { setKodePromoInput(e.target.value.toUpperCase()); setPromoError('') }}
-                          placeholder="Contoh: IBU2026"
-                          className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] font-mono font-semibold tracking-wide text-gray-800 focus:outline-none focus:border-[#185FA5]"
-                        />
-                        <button onClick={cekKodePromo} disabled={promoChecking || !kodePromoInput.trim()}
-                          className="px-4 rounded-xl bg-[#185FA5] text-white text-[12px] font-semibold disabled:opacity-40">
-                          {promoChecking ? <i className="ti ti-loader-2 animate-spin text-base" /> : 'Pakai'}
-                        </button>
-                      </div>
-                      {promoError && <div className="text-[11px] text-red-400 mt-1">{promoError}</div>}
-                    </>
-                  )}
-                </div>
-              )}
               {/* Ringkasan */}
               <div className="bg-[#E6F4FB] rounded-xl p-3.5">
                 <div className="text-[11px] font-semibold text-[#185FA5] uppercase tracking-wide mb-2">Ringkasan</div>
@@ -715,6 +678,42 @@ function DaftarPublikPageContent() {
                     Harga di atas <strong>belum termasuk biaya tiket masuk kolam renang</strong>.
                   </p>
                 </div>
+              </div>
+              {/* Kode Diskon */}
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">
+                  Kode Diskon <span className="normal-case text-gray-300">(opsional)</span>
+                </label>
+                {promoValid ? (
+                  <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-3.5 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <i className="ti ti-circle-check text-green-500 text-base" />
+                      <div>
+                        <div className="text-[12px] font-bold text-green-700">{promoValid.kode}</div>
+                        <div className="text-[11px] text-green-600">✓ Kode berhasil! Diskon {fmtRupiah(diskonAktif)}</div>
+                      </div>
+                    </div>
+                    <button onClick={() => { setPromoValid(null); setKodePromoInput(''); setPromoError('') }}
+                      className="text-[11px] text-gray-400 font-medium">× Hapus</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex gap-2">
+                      <input
+                        value={kodePromoInput}
+                        onChange={(e) => { setKodePromoInput(e.target.value.toUpperCase()); setPromoError('') }}
+                        placeholder="Contoh: IBU2026"
+                        disabled={promoChecking}
+                        className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] font-mono font-semibold tracking-wide text-gray-800 focus:outline-none focus:border-[#185FA5] disabled:opacity-50"
+                      />
+                      <button onClick={cekKodePromo} disabled={promoChecking || !kodePromoInput.trim()}
+                        className="px-4 rounded-xl bg-[#185FA5] text-white text-[12px] font-semibold disabled:opacity-40 whitespace-nowrap">
+                        {promoChecking ? 'Memeriksa...' : 'Pakai'}
+                      </button>
+                    </div>
+                    {promoError && <div className="text-[11px] text-red-500 mt-1">✗ {promoError}</div>}
+                  </>
+                )}
               </div>
               {/* Rekening */}
               <div>
