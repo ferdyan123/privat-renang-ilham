@@ -215,6 +215,8 @@ No. Rekening: ${REKENING.nomor}
 📋 *Lihat detail & upload bukti bayar:*
 ${generatedLink}
 
+*Pesan ini dikirim secara otomatis oleh sistem. Setelah melakukan pembayaran, mohon untuk mengunggah bukti transfer melalui tautan di atas ya Bapak/Ibu. Apabila ada pertanyaan atau kendala, silakan balas pesan ini. Terima kasih banyak Bapak/Ibu 🙏*
+
 _Terima kasih! 💙_`
 
     const wa = muridRepresentative.wa_ortu ? '62' + muridRepresentative.wa_ortu.replace(/^0/, '') : ''
